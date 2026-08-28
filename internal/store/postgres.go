@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE OR REPLACE VIEW history_leases AS
   SELECT id, persona_id, model_profile, thinking, started_at, ends_at, ended_at, status, summary, content_digest FROM leases;
 CREATE OR REPLACE VIEW history_events AS SELECT * FROM events;
+CREATE OR REPLACE VIEW history_journal AS
+  SELECT id, at, lease_id, persona_id, payload->>'entry' AS entry
+  FROM events WHERE type = 'journal.entry';
 CREATE OR REPLACE VIEW history_frames AS SELECT * FROM frames;
 CREATE OR REPLACE VIEW history_inference AS SELECT * FROM inference_requests;
 `
@@ -285,6 +288,27 @@ func (p *Postgres) ListEvents(ctx context.Context, limit int) ([]domain.Event, e
 			return nil, err
 		}
 		result = append(result, event)
+	}
+	return result, rows.Err()
+}
+
+func (p *Postgres) ListJournalEntries(ctx context.Context, personaID string, limit int) ([]domain.JournalEntry, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id,at,lease_id,persona_id,payload->>'entry'
+    FROM events WHERE type='journal.entry' AND ($1='' OR persona_id=$1) ORDER BY id DESC LIMIT $2`, personaID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []domain.JournalEntry
+	for rows.Next() {
+		var entry domain.JournalEntry
+		if err := rows.Scan(&entry.ID, &entry.At, &entry.LeaseID, &entry.PersonaID, &entry.Entry); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
 	}
 	return result, rows.Err()
 }

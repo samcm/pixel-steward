@@ -149,6 +149,37 @@ func TestRemovedPersonaEndsActiveLease(t *testing.T) {
 	}
 }
 
+func TestAgentWritesCuratedJournalEntry(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	service := testService(t, &now, agent.Disabled{}, display.NewFake())
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.store.ActiveLease(context.Background())
+	if err != nil || lease == nil {
+		t.Fatalf("active lease = %+v, error = %v", lease, err)
+	}
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+
+	entry, err := service.WriteJournal(context.Background(), token, "I displayed a tiny orbital diagram. Future agents can continue the astronomy thread.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.PersonaID != lease.PersonaID || !strings.Contains(entry.Entry, "orbital") {
+		t.Fatalf("journal entry = %+v", entry)
+	}
+	entries, err := service.Journal(context.Background(), lease.PersonaID, 10)
+	if err != nil || len(entries) != 1 || entries[0].ID != entry.ID {
+		t.Fatalf("journal = %+v, error = %v", entries, err)
+	}
+	if _, err := service.WriteJournal(context.Background(), token, "   "); err == nil {
+		t.Fatal("empty journal entry was accepted")
+	}
+}
+
 func TestExpiringTestWindowTemporarilyOverridesBlackout(t *testing.T) {
 	location, _ := time.LoadLocation("Australia/Brisbane")
 	now := time.Date(2026, 8, 28, 22, 0, 0, 0, location)

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/samcm/pixel-steward/internal/agent"
 	"github.com/samcm/pixel-steward/internal/budget"
@@ -90,6 +91,7 @@ type PersonaDetail struct {
 	Prompts       []domain.Event            `json:"prompts"`
 	Transcript    []domain.Event            `json:"transcript"`
 	Frames        []domain.Frame            `json:"frames"`
+	Journal       []domain.JournalEntry     `json:"journal"`
 	Inference     []domain.InferenceRequest `json:"inference"`
 	Schedules     []domain.Schedule         `json:"schedules"`
 	Truncated     bool                      `json:"truncated"`
@@ -345,6 +347,33 @@ func (s *Service) QueryHistory(ctx context.Context, token, query string) (domain
 	return s.store.QueryHistory(ctx, lease.ID, query)
 }
 
+// WriteJournal records the agent's own concise account of its work. It is
+// deliberately separate from runtime telemetry so future agents can recover
+// narrative context without reverse-engineering raw event payloads.
+func (s *Service) WriteJournal(ctx context.Context, token, value string) (domain.JournalEntry, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return domain.JournalEntry{}, err
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return domain.JournalEntry{}, errors.New("journal entry must not be empty")
+	}
+	if utf8.RuneCountInString(value) > 1200 {
+		return domain.JournalEntry{}, errors.New("journal entry must be at most 1200 characters")
+	}
+	event, err := s.store.AppendEvent(ctx, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID,
+		Actor: "agent", Type: "journal.entry", Payload: jsonValue(map[string]string{"entry": value})})
+	if err != nil {
+		return domain.JournalEntry{}, err
+	}
+	return domain.JournalEntry{ID: event.ID, At: event.At, LeaseID: event.LeaseID, PersonaID: event.PersonaID, Entry: value}, nil
+}
+
+func (s *Service) Journal(ctx context.Context, personaID string, limit int) ([]domain.JournalEntry, error) {
+	return s.store.ListJournalEntries(ctx, personaID, limit)
+}
+
 func (s *Service) Exec(ctx context.Context, token, command string, timeout time.Duration) (executor.Result, error) {
 	lease, err := s.authorize(ctx, token)
 	if err != nil {
@@ -571,6 +600,10 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 	if err != nil {
 		return PersonaDetail{}, err
 	}
+	journal, err := s.store.ListJournalEntries(ctx, id, 1000)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
 	inference, err := s.store.ListInferenceRequests(ctx, "", 1000)
 	if err != nil {
 		return PersonaDetail{}, err
@@ -582,7 +615,7 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 
 	detail := PersonaDetail{Persona: persona,
 		Leases: filterLeases(leases, id), Events: filterEvents(events, id),
-		Frames: filterFrames(frames, id), Inference: filterInference(inference, id),
+		Frames: filterFrames(frames, id), Journal: journal, Inference: filterInference(inference, id),
 		Schedules: filterSchedules(schedules, id), Prompts: make([]domain.Event, 0), Transcript: make([]domain.Event, 0),
 		Truncated: len(leases) == 1000 || len(events) == 1000 || len(frames) == 1000 || len(inference) == 1000,
 	}

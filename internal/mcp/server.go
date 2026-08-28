@@ -105,6 +105,7 @@ func tools() []map[string]any {
 	return []map[string]any{
 		{"name": "studio_budget", "description": "Return the current lease's hard inference budget, usage, reservations, remaining amounts, lease end, and operator-controlled reasoning setting.", "inputSchema": objectSchema(nil, nil)},
 		{"name": "studio_sql", "description": "Run one flexible read-only PostgreSQL SELECT/WITH query against shared display history. Results are capped at 500 rows.", "inputSchema": objectSchema(map[string]any{"query": map[string]string{"type": "string", "description": "A read-only PostgreSQL query"}}, []string{"query"})},
+		{"name": "studio_journal", "description": "Write your own concise 1-3 sentence account of what you showed, learned, or left for future agents. Write one entry before finishing each wake; this is the human-readable shared history.", "inputSchema": objectSchema(map[string]any{"entry": map[string]any{"type": "string", "minLength": 1, "maxLength": 1200, "description": "A self-contained 1-3 sentence journal entry"}}, []string{"entry"})},
 		{"name": "studio_exec", "description": "Run an arbitrary shell command inside your disposable sandbox. This can create programs and assets or manage Docker in that sandbox; it cannot access the controller or homelab.", "inputSchema": objectSchema(map[string]any{"command": map[string]string{"type": "string"}, "timeout_ms": map[string]any{"type": "integer", "minimum": 1, "maximum": 600000}}, []string{"command"})},
 		{"name": "studio_publish", "description": "Submit one image already present in your sandbox. This is a model-driven scene commit; use studio_watch for locally generated frame sequences.", "inputSchema": objectSchema(map[string]any{"path": map[string]string{"type": "string", "description": "Workspace-relative PNG, JPEG, GIF, or raw 64x64 RGB path"}}, []string{"path"})},
 		{"name": "studio_watch", "description": "Continuously sample and publish a workspace image that a local renderer updates, without using inference per frame.", "inputSchema": objectSchema(map[string]any{"path": map[string]string{"type": "string"}, "fps": map[string]any{"type": "number", "minimum": 0.01}}, []string{"path", "fps"})},
@@ -135,6 +136,8 @@ func (s *Server) call(ctx context.Context, name string, arguments json.RawMessag
 		method, path, body = http.MethodGet, "/agent/v1/budget", nil
 	case "studio_sql":
 		path = "/agent/v1/sql"
+	case "studio_journal":
+		path = "/agent/v1/journal"
 	case "studio_exec":
 		path = "/agent/v1/exec"
 	case "studio_publish":

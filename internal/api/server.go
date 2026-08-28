@@ -59,6 +59,7 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT /api/v1/lease/reasoning", s.operator(http.HandlerFunc(s.reasoning)))
 	s.mux.Handle("GET /api/v1/leases", s.operator(http.HandlerFunc(s.leases)))
 	s.mux.Handle("GET /api/v1/events", s.operator(http.HandlerFunc(s.events)))
+	s.mux.Handle("GET /api/v1/journal", s.operator(http.HandlerFunc(s.journal)))
 	s.mux.Handle("GET /api/v1/frames", s.operator(http.HandlerFunc(s.frames)))
 	s.mux.Handle("GET /api/v1/inference", s.operator(http.HandlerFunc(s.inference)))
 	s.mux.Handle("GET /api/v1/preview.png", s.operator(http.HandlerFunc(s.preview)))
@@ -66,6 +67,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /agent/v1/budget", s.agentBudget)
 	s.mux.HandleFunc("POST /agent/v1/sql", s.agentSQL)
+	s.mux.HandleFunc("POST /agent/v1/journal", s.agentJournal)
 	s.mux.HandleFunc("POST /agent/v1/exec", s.agentExec)
 	s.mux.HandleFunc("POST /agent/v1/publish", s.agentPublish)
 	s.mux.HandleFunc("POST /agent/v1/watch", s.agentWatch)
@@ -130,6 +132,11 @@ func (s *Server) events(response http.ResponseWriter, request *http.Request) {
 	writeJSON(response, value, err)
 }
 
+func (s *Server) journal(response http.ResponseWriter, request *http.Request) {
+	value, err := s.service.Journal(request.Context(), request.URL.Query().Get("persona_id"), limit(request))
+	writeJSON(response, value, err)
+}
+
 func (s *Server) frames(response http.ResponseWriter, request *http.Request) {
 	value, err := s.service.Store().ListFrames(request.Context(), request.URL.Query().Get("lease_id"), limit(request))
 	writeJSON(response, value, err)
@@ -184,6 +191,18 @@ func (s *Server) agentSQL(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	value, err := s.service.QueryHistory(request.Context(), bearer(request), body.Query)
+	writeJSON(response, value, err)
+}
+
+func (s *Server) agentJournal(response http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Entry string `json:"entry"`
+	}
+	if err := decode(request, &body); err != nil {
+		writeJSON(response, nil, err)
+		return
+	}
+	value, err := s.service.WriteJournal(request.Context(), bearer(request), body.Entry)
 	writeJSON(response, value, err)
 }
 

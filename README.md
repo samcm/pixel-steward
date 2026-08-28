@@ -24,6 +24,8 @@ example values, and deployment primitives.
 - provider-native OpenCode token, reasoning-token, cache-token, and cost event
   capture;
 - flexible read-only PostgreSQL history through `studio_sql`;
+- agent-authored 1-3 sentence journal entries, exposed as `history_journal`, so
+  future agents can recover intent without decoding runtime telemetry;
 - a disposable-executor contract for arbitrary commands and Docker workloads;
 - one-shot scene publishing and budget-free sampling of locally rendered files;
 - immutable source/final-frame archival to a filesystem or S3-compatible store;
@@ -72,6 +74,8 @@ disabled sandbox execution.
   lease end, and the effective operator-controlled reasoning setting.
 - `studio_sql({query})` accepts a read-only PostgreSQL `SELECT` or `WITH` query
   and returns at most 500 rows.
+- `studio_journal({entry})` writes the agent's concise account of the current
+  wake to the shared, human-readable history.
 - `studio_exec({command, timeout_ms})` runs arbitrary shell in the configured
   disposable executor, never in the controller.
 - `studio_publish({path})` publishes one model-driven scene from the sandbox.

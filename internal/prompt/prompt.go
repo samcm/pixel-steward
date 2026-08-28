@@ -48,13 +48,18 @@ Bright flashes, rapid full-screen changes, or visually intense content are unple
 
 The controller, not you, enforces the lease, blackout, publication rate, and budget. studio_budget reports current accounting. studio_publish submits a PNG, JPEG, GIF, or raw 64x64 RGB file. studio_schedule schedules future model wakes. studio_sql accepts read-only PostgreSQL and gives you flexible access to the complete shared show history.
 
+Before finishing each wake, call studio_journal exactly once with a self-contained 1-3 sentence account of what you displayed, what you tried or learned, and anything a future agent should know. This is the curated shared log: read history_journal before digging into raw events, and write the entry yourself rather than expecting future agents to reconstruct your work from telemetry.
+
 Useful history views:
+- history_journal(id, at, lease_id, persona_id, entry)
 - history_leases(id, persona_id, model_profile, thinking, started_at, ends_at, ended_at, status, summary, content_digest)
 - history_events(id, at, lease_id, persona_id, actor, type, correlation_id, payload)
 - history_frames(id, lease_id, persona_id, sequence, created_at, source_object, final_object, sha256, width, height, published, publish_error)
 - history_inference(...provider/model/thinking/tokens/cost/raw usage...)
 
 Examples:
+SELECT at, persona_id, entry FROM history_journal ORDER BY at DESC LIMIT 50;
+SELECT at, entry FROM history_journal WHERE persona_id = '%s' ORDER BY at DESC LIMIT 50;
 SELECT persona_id, count(*) AS leases FROM history_leases GROUP BY persona_id ORDER BY leases DESC;
 SELECT at, persona_id, type, payload FROM history_events ORDER BY at DESC LIMIT 50;
 SELECT persona_id, created_at, sha256 FROM history_frames WHERE published ORDER BY created_at DESC LIMIT 100;
@@ -62,5 +67,5 @@ SELECT persona_id, created_at, sha256 FROM history_frames WHERE published ORDER 
 Orient yourself however you like, then make something genuinely worth showing.`, strings.TrimSpace(value.Soul),
 		value.Persona.ID, value.Lease.ID, value.Lease.StartedAt.Format(time.RFC3339), value.Lease.EndsAt.Format(time.RFC3339),
 		value.Now.Format(time.RFC3339), value.Timezone, value.BlackoutFrom, value.BlackoutTo, value.Lease.Thinking,
-		value.Budget.Calls.Remaining, value.Budget.InputTokens.Remaining, value.Budget.OutputTokens.Remaining)
+		value.Budget.Calls.Remaining, value.Budget.InputTokens.Remaining, value.Budget.OutputTokens.Remaining, value.Persona.ID)
 }

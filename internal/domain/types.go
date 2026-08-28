@@ -40,6 +40,17 @@ type Event struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
+// JournalEntry is the agent-authored, human-readable account of a wake. Raw
+// events remain available for diagnostics; journal entries are the durable
+// narrative that future agents and operators should read first.
+type JournalEntry struct {
+	ID        int64     `json:"id"`
+	At        time.Time `json:"at"`
+	LeaseID   string    `json:"lease_id"`
+	PersonaID string    `json:"persona_id"`
+	Entry     string    `json:"entry"`
+}
+
 type Frame struct {
 	ID           int64     `json:"id"`
 	LeaseID      string    `json:"lease_id"`

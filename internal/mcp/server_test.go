@@ -15,7 +15,7 @@ func TestInitializeAndListTools(t *testing.T) {
 	if err := server.Serve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "studio_budget") || !strings.Contains(output.String(), "protocolVersion") {
+	if !strings.Contains(output.String(), "studio_budget") || !strings.Contains(output.String(), "studio_journal") || !strings.Contains(output.String(), "protocolVersion") {
 		t.Fatalf("unexpected output: %s", output.String())
 	}
 }

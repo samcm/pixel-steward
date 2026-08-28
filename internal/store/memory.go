@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"sync"
@@ -166,6 +167,26 @@ func (m *Memory) ListEvents(_ context.Context, limit int) ([]domain.Event, error
 	defer m.mu.RUnlock()
 
 	return tailReverse(m.events, limit), nil
+}
+
+func (m *Memory) ListJournalEntries(_ context.Context, personaID string, limit int) ([]domain.JournalEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entries := make([]domain.JournalEntry, 0)
+	for _, event := range m.events {
+		if event.Type != "journal.entry" || (personaID != "" && event.PersonaID != personaID) {
+			continue
+		}
+		var payload struct {
+			Entry string `json:"entry"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			continue
+		}
+		entries = append(entries, domain.JournalEntry{ID: event.ID, At: event.At, LeaseID: event.LeaseID,
+			PersonaID: event.PersonaID, Entry: payload.Entry})
+	}
+	return tailReverse(entries, limit), nil
 }
 
 func (m *Memory) AppendFrame(_ context.Context, frame domain.Frame) (domain.Frame, error) {
