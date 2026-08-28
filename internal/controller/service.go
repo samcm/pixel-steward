@@ -95,6 +95,20 @@ type PersonaDetail struct {
 	Truncated     bool                      `json:"truncated"`
 }
 
+// ModelProfileDetail is the secret-safe operator view of an inference route.
+// CredentialEnv names a required environment variable but never exposes its
+// value.
+type ModelProfileDetail struct {
+	Name          string          `json:"name"`
+	Provider      string          `json:"provider"`
+	Model         string          `json:"model"`
+	Endpoint      string          `json:"endpoint,omitempty"`
+	CredentialEnv string          `json:"credential_env,omitempty"`
+	Thinking      config.Thinking `json:"thinking"`
+	Billing       config.Billing  `json:"billing"`
+	Selected      bool            `json:"selected"`
+}
+
 func New(cfg config.Config, database store.Store, objects objectstore.Store, panel display.Display, runner agent.Runner, sandbox executor.Executor, clock Clock) (*Service, error) {
 	if clock == nil {
 		clock = time.Now
@@ -504,6 +518,24 @@ func (s *Service) Personas(ctx context.Context) ([]domain.Persona, error) {
 		}
 	}
 	return result, nil
+}
+
+func (s *Service) ModelProfiles() []ModelProfileDetail {
+	names := make([]string, 0, len(s.config.ModelProfiles))
+	for name := range s.config.ModelProfiles {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	result := make([]ModelProfileDetail, 0, len(names))
+	for _, name := range names {
+		profile := s.config.ModelProfiles[name]
+		result = append(result, ModelProfileDetail{
+			Name: name, Provider: profile.Provider, Model: profile.Model, Endpoint: profile.Endpoint,
+			CredentialEnv: profile.CredentialEnv, Thinking: profile.Thinking, Billing: profile.Billing,
+			Selected: name == s.config.Inference.ModelProfile,
+		})
+	}
+	return result
 }
 
 func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, error) {

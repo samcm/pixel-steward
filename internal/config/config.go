@@ -136,17 +136,17 @@ type ModelProfile struct {
 }
 
 type Thinking struct {
-	Default      string   `yaml:"default"`
-	Allowed      []string `yaml:"allowed"`
-	Capabilities string   `yaml:"capabilities"`
-	CacheImpact  string   `yaml:"cache_impact"`
+	Default      string   `yaml:"default" json:"default"`
+	Allowed      []string `yaml:"allowed" json:"allowed"`
+	Capabilities string   `yaml:"capabilities" json:"capabilities,omitempty"`
+	CacheImpact  string   `yaml:"cache_impact" json:"cache_impact,omitempty"`
 }
 
 type Billing struct {
-	Mode                       string `yaml:"mode"`
-	RateCard                   string `yaml:"rate_card"`
-	PrivateRateCard            string `yaml:"private_rate_card"`
-	PreferProviderReportedCost bool   `yaml:"prefer_provider_reported_cost"`
+	Mode                       string `yaml:"mode" json:"mode"`
+	RateCard                   string `yaml:"rate_card" json:"rate_card,omitempty"`
+	PrivateRateCard            string `yaml:"private_rate_card" json:"private_rate_card,omitempty"`
+	PreferProviderReportedCost bool   `yaml:"prefer_provider_reported_cost" json:"prefer_provider_reported_cost"`
 }
 
 type Persona struct {
