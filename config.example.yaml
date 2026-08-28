@@ -1,0 +1,72 @@
+version: 1
+timezone: UTC
+
+http:
+  listen: 127.0.0.1:8080
+  auth:
+    mode: disabled
+
+database:
+  driver: memory
+
+storage:
+  driver: filesystem
+  directory: ./data/objects
+
+display:
+  adapter: fake
+  max_fps: 1
+  blackout:
+    start: "21:00"
+    end: "09:00"
+
+scheduler:
+  default_lease: 24h
+  selection: weighted_random
+  avoid_immediate_repeat: true
+  default_cooldown: 24h
+
+inference:
+  allowed_window:
+    start: "09:00"
+    end: "21:00"
+  blackout_behavior: suspend
+  default_thinking: low
+  thinking_change_policy: operator_only
+  lease_budget:
+    max_input_tokens: 100000
+    max_output_tokens: 20000
+    max_model_calls: 16
+    max_active_runtime: 20m
+    max_model_scene_commits: 32
+  per_call:
+    max_output_tokens: 4096
+
+runtime:
+  driver: disabled
+  workspace_root: ./data/workspaces
+
+sandbox:
+  driver: disabled
+  local_root: ./data/sandboxes
+  max_exec_time: 10m
+
+model_profiles:
+  example-model:
+    provider: example
+    model: example-model-id
+    thinking:
+      default: low
+      allowed: [low, medium, high]
+    billing:
+      mode: unknown
+
+personas:
+  - id: example
+    display_name: Example Persona
+    enabled: true
+    weight: 1
+    cooldown: 24h
+    model_profile: example-model
+    thinking: low
+    soul: ./personas/example.md

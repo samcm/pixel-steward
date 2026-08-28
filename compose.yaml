@@ -1,0 +1,43 @@
+services:
+  controller:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PIXEL_STEWARD_DATABASE_URL: postgres://pixel_steward:development-only@postgres:5432/pixel_steward
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ./deploy/compose/config.yaml:/etc/pixel-steward/config.yaml:ro
+      - ./personas:/etc/pixel-steward/personas:ro
+      - objects:/var/lib/pixel-steward/objects
+      - workspaces:/var/lib/pixel-steward/workspaces
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pixel_steward
+      POSTGRES_USER: pixel_steward
+      POSTGRES_PASSWORD: development-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pixel_steward -d pixel_steward"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+volumes:
+  objects:
+  postgres:
+  workspaces:

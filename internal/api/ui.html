@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pixel Steward</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a0d0c;--card:#121816;--line:#24322d;--ink:#e8f2ed;--muted:#91a49b;--green:#64e6a5;--amber:#ffcb6b;--red:#ff6b78}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#163126 0,transparent 30rem),var(--bg);color:var(--ink);font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}main{max-width:1240px;margin:auto;padding:28px}.top{display:flex;align-items:end;justify-content:space-between;margin-bottom:22px}h1{font-size:26px;letter-spacing:-1px;margin:0}h2{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin:0 0 14px}.pill{border:1px solid var(--line);border-radius:99px;padding:6px 10px;color:var(--green)}.grid{display:grid;grid-template-columns:260px 1fr 1fr;gap:14px}.card{background:color-mix(in srgb,var(--card) 94%,transparent);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}.preview{image-rendering:pixelated;width:224px;height:224px;background:#000;border:1px solid var(--line);border-radius:5px}.wide{grid-column:span 2}.full{grid-column:1/-1}.metric{font-size:23px}.muted{color:var(--muted)}.bar{height:6px;background:#202a26;border-radius:5px;overflow:hidden;margin:7px 0 13px}.bar i{display:block;height:100%;background:var(--green)}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:8px 6px;vertical-align:top}th{color:var(--muted);font-weight:500}code{white-space:pre-wrap;word-break:break-word}button{font:inherit;color:var(--ink);background:#1d2924;border:1px solid #34463e;border-radius:6px;padding:6px 9px;cursor:pointer}button.danger{color:var(--red)}@media(max-width:850px){.grid{grid-template-columns:1fr}.wide,.full{grid-column:auto}.preview{width:192px;height:192px}}
+  </style>
+</head>
+<body><main>
+  <div class="top"><div><div class="muted">AUTONOMOUS DISPLAY CONTROL PLANE</div><h1>Pixel Steward</h1></div><div id="state" class="pill">loading</div></div>
+  <div class="grid">
+    <section class="card"><h2>Live canvas</h2><img id="preview" class="preview" alt="No frame yet"></section>
+    <section class="card"><h2>Current lease</h2><div id="lease"></div></section>
+    <section class="card"><h2>Inference budget</h2><div id="budget"></div></section>
+    <section class="card wide"><h2>Personas</h2><div id="personas"></div></section>
+    <section class="card"><h2>Display</h2><div id="display"></div></section>
+    <section class="card full"><h2>Recent events</h2><div style="overflow:auto"><table><thead><tr><th>time</th><th>persona</th><th>actor</th><th>event</th><th>payload</th></tr></thead><tbody id="events"></tbody></table></div></section>
+    <section class="card full"><h2>Frame archive</h2><div id="frames" style="display:flex;gap:12px;overflow:auto"></div></section>
+    <section class="card full"><h2>Inference ledger</h2><div style="overflow:auto"><table><thead><tr><th>time</th><th>persona</th><th>provider/model</th><th>reasoning</th><th>tokens</th><th>cache</th><th>cost</th><th>status</th></tr></thead><tbody id="inference"></tbody></table></div></section>
+  </div>
+</main><script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const api=async(path,opt)=>{const r=await fetch(path,opt);if(!r.ok)throw Error(await r.text());return r.json()};
+const bar=(label,x)=>{const used=x?.used||0,lim=x?.limit||0,p=lim?Math.min(100,used/lim*100):0;return `<div>${esc(label)} <span class="muted">${used.toLocaleString()} / ${lim.toLocaleString()}</span></div><div class="bar"><i style="width:${p}%"></i></div>`};
+async function refresh(){try{const [s,p,e,f,i]=await Promise.all([api('/api/v1/status'),api('/api/v1/personas'),api('/api/v1/events?limit=60'),api('/api/v1/frames?limit=30'),api('/api/v1/inference?limit=60')]);
+ document.querySelector('#state').textContent=s.blackout?'BLACKOUT':(s.agent_running?'AGENT ACTIVE':'DAYLIGHT');
+ document.querySelector('#preview').src='/api/v1/preview.png?t='+Date.now();
+ document.querySelector('#lease').innerHTML=s.lease?`<div class="metric">${esc(s.lease.persona_id)}</div><p class="muted">${esc(s.lease.id)}<br>${new Date(s.lease.started_at).toLocaleString()} → ${new Date(s.lease.ends_at).toLocaleString()}<br>${esc(s.lease.model_profile)}</p><label>Reasoning <select onchange="setReasoning(this.value)">${(s.reasoning?.allowed||[]).map(x=>`<option ${x===s.reasoning.effective?'selected':''}>${esc(x)}</option>`).join('')}</select></label><div class="muted">cache impact: ${esc(s.reasoning?.cache_impact||'unknown')}</div><br><button class="danger" onclick="revoke()">Revoke lease</button>`:'<span class="muted">No active lease</span>';
+ const b=s.budget;document.querySelector('#budget').innerHTML=b?bar('Input',b.input_tokens)+bar('Output',b.output_tokens)+bar('Calls',b.calls)+bar('Scene commits',b.scene_commits)+`<div class="muted">Estimated metered cost $${((b.estimated_metered_cost.used_micros||0)/1e6).toFixed(4)}</div>`:'<span class="muted">No active budget</span>';
+ document.querySelector('#personas').innerHTML=`<table><thead><tr><th>persona</th><th>model</th><th>reasoning</th><th>weight</th><th>runtime override</th></tr></thead><tbody>${p.map(x=>`<tr><td>${esc(x.display_name)}<br><span class="muted">${esc(x.id)}</span></td><td>${esc(x.model_profile)}</td><td>${esc(x.thinking)}</td><td>${x.weight}</td><td><button onclick="enablePersona('${encodeURIComponent(x.id)}',${!x.enabled})">${x.enabled?'Disable':'Enable'}</button></td></tr>`).join('')}</tbody></table>`;
+ document.querySelector('#display').innerHTML=`<div class="metric">${s.display.online?'online':'offline'}</div><p class="muted">screen ${s.display.screen_on?'on':'off'}<br>${s.display.frames||0} frames · ${s.display.skipped||0} skipped<br>next policy transition ${new Date(s.next_transition).toLocaleString()}</p>`;
+ document.querySelector('#events').innerHTML=e.map(x=>`<tr><td>${new Date(x.at).toLocaleTimeString()}</td><td>${esc(x.persona_id)}</td><td>${esc(x.actor)}</td><td>${esc(x.type)}</td><td><code>${esc(JSON.stringify(x.payload))}</code></td></tr>`).join('');
+ document.querySelector('#frames').innerHTML=f.length?f.map(x=>`<a href="/api/v1/objects?key=${encodeURIComponent(x.final_object)}" target="_blank" style="color:inherit;text-decoration:none"><img src="/api/v1/objects?key=${encodeURIComponent(x.final_object)}" style="width:96px;height:96px;image-rendering:pixelated;background:#000"><div class="muted">${esc(x.persona_id)} · #${x.sequence}<br>${new Date(x.created_at).toLocaleString()}</div></a>`).join(''):'<span class="muted">No archived frames</span>';
+ document.querySelector('#inference').innerHTML=i.length?i.map(x=>`<tr><td>${new Date(x.started_at).toLocaleString()}</td><td>${esc(x.persona_id)}</td><td>${esc(x.provider)}/${esc(x.model)}</td><td>${esc(x.thinking)}</td><td>${x.prompt_tokens.toLocaleString()} in<br>${x.completion_tokens.toLocaleString()} out<br>${x.reasoning_tokens.toLocaleString()} reasoning</td><td>${x.cache_read_tokens.toLocaleString()} read<br>${x.cache_write_tokens.toLocaleString()} write</td><td>$${((x.estimated_metered_micros||0)/1e6).toFixed(4)}</td><td>${esc(x.status)}<details><summary>raw</summary><code>${esc(JSON.stringify(x.raw_usage))}</code></details></td></tr>`).join(''):'<tr><td colspan="8" class="muted">No inference requests</td></tr>';
+}catch(e){document.querySelector('#state').textContent='ERROR';console.error(e)}}
+async function enablePersona(id,enabled){await api('/api/v1/personas/'+id+'/enabled',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({enabled})});refresh()}
+async function revoke(){await api('/api/v1/lease/revoke',{method:'POST'});refresh()}
+async function setReasoning(value){if(!confirm('Apply operator-only reasoning override? This may change provider cache behavior.'))return;await api('/api/v1/lease/reasoning',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({value})});refresh()}
+refresh();setInterval(refresh,3000);
+</script></body></html>

@@ -1,0 +1,13 @@
+/pixel-steward
+/pixel-steward-mcp
+/config.yaml
+/.env
+/data/
+/dist/
+*.out
+*.test
+config.yaml
+data/
+.env
+*.local.yaml
+pixel-steward

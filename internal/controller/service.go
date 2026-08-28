@@ -1,0 +1,803 @@
+package controller
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/samcm/pixel-steward/internal/agent"
+	"github.com/samcm/pixel-steward/internal/budget"
+	"github.com/samcm/pixel-steward/internal/config"
+	"github.com/samcm/pixel-steward/internal/display"
+	"github.com/samcm/pixel-steward/internal/domain"
+	"github.com/samcm/pixel-steward/internal/executor"
+	"github.com/samcm/pixel-steward/internal/frame"
+	"github.com/samcm/pixel-steward/internal/objectstore"
+	"github.com/samcm/pixel-steward/internal/policy"
+	"github.com/samcm/pixel-steward/internal/prompt"
+	"github.com/samcm/pixel-steward/internal/scheduler"
+	"github.com/samcm/pixel-steward/internal/store"
+)
+
+var (
+	ErrUnauthorized = errors.New("invalid or expired agent credential")
+	ErrBlackout     = errors.New("display is in blackout")
+	ErrLeaseExpired = errors.New("lease is not active")
+)
+
+type Clock func() time.Time
+
+type Service struct {
+	config   config.Config
+	store    store.Store
+	objects  objectstore.Store
+	display  display.Display
+	runner   agent.Runner
+	executor executor.Executor
+	clock    Clock
+	window   policy.DailyWindow
+	selectr  scheduler.Selector
+
+	mu           sync.Mutex
+	ledgers      map[string]*budget.Ledger
+	tokens       map[string]string
+	running      map[string]context.CancelFunc
+	sandboxState map[string]string
+	screenState  *bool
+}
+
+type Status struct {
+	AsOf           time.Time        `json:"as_of"`
+	Blackout       bool             `json:"blackout"`
+	NextTransition time.Time        `json:"next_transition"`
+	Lease          *domain.Lease    `json:"lease,omitempty"`
+	Budget         *budget.Snapshot `json:"budget,omitempty"`
+	Display        display.Status   `json:"display"`
+	AgentRunning   bool             `json:"agent_running"`
+	Reasoning      *ReasoningStatus `json:"reasoning,omitempty"`
+}
+
+type ReasoningStatus struct {
+	Effective   string   `json:"effective"`
+	Source      string   `json:"source"`
+	Allowed     []string `json:"allowed"`
+	CacheImpact string   `json:"cache_impact"`
+}
+
+func New(cfg config.Config, database store.Store, objects objectstore.Store, panel display.Display, runner agent.Runner, sandbox executor.Executor, clock Clock) (*Service, error) {
+	if clock == nil {
+		clock = time.Now
+	}
+	location, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return nil, err
+	}
+	window, err := policy.NewDailyWindow(cfg.Display.Blackout.Start, cfg.Display.Blackout.End, location)
+	if err != nil {
+		return nil, err
+	}
+	if runner == nil {
+		runner = agent.Disabled{}
+	}
+	if sandbox == nil {
+		sandbox = executor.Disabled{}
+	}
+	service := &Service{
+		config: cfg, store: database, objects: objects, display: panel, runner: runner, executor: sandbox, clock: clock, window: window,
+		selectr: scheduler.Selector{AvoidImmediateRepeat: cfg.Scheduler.AvoidImmediateRepeat},
+		ledgers: make(map[string]*budget.Ledger), tokens: make(map[string]string), running: make(map[string]context.CancelFunc), sandboxState: make(map[string]string),
+	}
+	if err := service.syncPersonas(context.Background()); err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+func (s *Service) Run(ctx context.Context) error {
+	if err := s.Tick(ctx); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.stopAll()
+			return ctx.Err()
+		case <-ticker.C:
+			if err := s.Tick(ctx); err != nil {
+				s.event(ctx, domain.Event{At: s.clock(), Actor: "controller", Type: "controller.tick.error", Payload: jsonValue(map[string]string{"error": err.Error()})})
+			}
+		}
+	}
+}
+
+func (s *Service) Tick(ctx context.Context) error {
+	now := s.clock()
+	blackout := s.window.Contains(now)
+	if err := s.enforceScreen(ctx, !blackout); err != nil {
+		return err
+	}
+	lease, err := s.store.ActiveLease(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil && !now.Before(lease.EndsAt) {
+		s.stop(lease.ID)
+		if err := s.store.EndLease(ctx, lease.ID, "complete"); err != nil {
+			return err
+		}
+		_ = s.executor.Destroy(ctx, lease.ID)
+		s.mu.Lock()
+		delete(s.sandboxState, lease.ID)
+		s.mu.Unlock()
+		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "lease.ended", Payload: jsonValue(map[string]string{"reason": "deadline"})})
+		lease = nil
+	}
+	if blackout {
+		if lease != nil {
+			s.stop(lease.ID)
+			_ = s.setSandbox(ctx, lease.ID, false)
+		}
+		return nil
+	}
+	if lease == nil {
+		lease, err = s.createLease(ctx, now)
+		if errors.Is(err, scheduler.ErrNoEligiblePersona) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+	_ = s.setSandbox(ctx, lease.ID, true)
+	if err := s.ensureLeaseState(ctx, lease); err != nil {
+		return err
+	}
+	if s.isRunning(lease.ID) {
+		return nil
+	}
+
+	requests, err := s.store.ListInferenceRequests(ctx, lease.ID, 1)
+	if err != nil {
+		return err
+	}
+	if len(requests) == 0 {
+		events, err := s.store.ListEvents(ctx, 10000)
+		if err != nil {
+			return err
+		}
+		attempted := false
+		for _, event := range events {
+			if event.LeaseID == lease.ID && event.Type == "agent.wake.started" {
+				attempted = true
+				break
+			}
+		}
+		if !attempted {
+			return s.startWake(ctx, *lease, "initial", nil)
+		}
+	}
+	due, err := s.store.ListSchedules(ctx, lease.ID, &now)
+	if err != nil {
+		return err
+	}
+	if len(due) == 0 {
+		return nil
+	}
+	schedule := due[0]
+	if schedule.Kind == "renderer" {
+		return s.runRenderer(ctx, *lease, schedule, now)
+	}
+	if schedule.MissedPolicy == "skip" && schedule.NextRunAt != nil && (s.window.Contains(*schedule.NextRunAt) || now.Sub(*schedule.NextRunAt) > 30*time.Second) {
+		var next *time.Time
+		if schedule.Interval > 0 {
+			value := *schedule.NextRunAt
+			for !value.After(now) {
+				value = value.Add(schedule.Interval)
+			}
+			if value.Before(lease.EndsAt) {
+				next = &value
+			}
+		}
+		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "schedule.skipped", Payload: jsonValue(schedule)})
+		return s.store.MarkScheduleRun(ctx, lease.ID, schedule.ID, now, next)
+	}
+	var next *time.Time
+	if schedule.Interval > 0 {
+		value := now.Add(schedule.Interval)
+		next = &value
+	}
+	if err := s.store.MarkScheduleRun(ctx, lease.ID, schedule.ID, now, next); err != nil {
+		return err
+	}
+	return s.startWake(ctx, *lease, "schedule:"+schedule.ID, schedule.Payload)
+}
+
+func (s *Service) Status(ctx context.Context) (Status, error) {
+	now := s.clock()
+	lease, err := s.store.ActiveLease(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	panel, panelErr := s.display.Status(ctx)
+	status := Status{AsOf: now, Blackout: s.window.Contains(now), NextTransition: s.window.NextTransition(now), Lease: lease, Display: panel}
+	if lease != nil {
+		if err := s.ensureLeaseState(ctx, lease); err != nil {
+			return Status{}, err
+		}
+		s.mu.Lock()
+		ledger := s.ledgers[lease.ID]
+		_, status.AgentRunning = s.running[lease.ID]
+		s.mu.Unlock()
+		snapshot := ledger.Snapshot(now)
+		status.Budget = &snapshot
+		profile := s.config.ModelProfiles[lease.ModelProfile]
+		status.Reasoning = &ReasoningStatus{Effective: lease.Thinking, Source: "lease_config", Allowed: profile.Thinking.Allowed, CacheImpact: profile.Thinking.CacheImpact}
+	}
+	return status, panelErr
+}
+
+func (s *Service) Budget(ctx context.Context, token string) (budget.Snapshot, domain.Lease, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return budget.Snapshot{}, domain.Lease{}, err
+	}
+	s.mu.Lock()
+	ledger := s.ledgers[lease.ID]
+	s.mu.Unlock()
+	return ledger.Snapshot(s.clock()), lease, nil
+}
+
+func (s *Service) Blackout() bool { return s.window.Contains(s.clock()) }
+
+func (s *Service) QueryHistory(ctx context.Context, token, query string) (domain.SQLResult, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return domain.SQLResult{}, err
+	}
+	return s.store.QueryHistory(ctx, lease.ID, query)
+}
+
+func (s *Service) Exec(ctx context.Context, token, command string, timeout time.Duration) (executor.Result, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return executor.Result{}, err
+	}
+	if s.window.Contains(s.clock()) {
+		return executor.Result{}, ErrBlackout
+	}
+	result, err := s.executor.Exec(ctx, lease.ID, command, timeout)
+	s.event(ctx, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "agent", Type: "sandbox.exec", Payload: jsonValue(map[string]any{
+		"command": command, "timeout_ms": timeout.Milliseconds(), "result": result, "error": errorString(err),
+	})})
+	return result, err
+}
+
+func (s *Service) PublishPath(ctx context.Context, token, path string, modelDriven bool) (domain.Frame, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	if s.window.Contains(s.clock()) {
+		return domain.Frame{}, ErrBlackout
+	}
+	source, contentType, err := s.executor.ReadFile(ctx, lease.ID, path)
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	defer source.Close()
+	return s.Publish(ctx, token, contentType, source, modelDriven)
+}
+
+func (s *Service) WatchRenderer(ctx context.Context, token, path string, fps float64) (domain.Schedule, error) {
+	if fps <= 0 || fps > s.config.Display.MaxFPS {
+		return domain.Schedule{}, fmt.Errorf("fps must be greater than zero and at most %.3g", s.config.Display.MaxFPS)
+	}
+	now := s.clock()
+	interval := time.Duration(float64(time.Second) / fps)
+	payload := jsonValue(map[string]string{"path": path})
+	schedule := domain.Schedule{Kind: "renderer", Label: "renderer:" + path, RunAt: now.Add(interval), Interval: interval,
+		MissedPolicy: "skip", Payload: payload}
+	return s.CreateSchedule(ctx, token, schedule)
+}
+
+func (s *Service) Publish(ctx context.Context, token, contentType string, source io.Reader, modelDriven bool) (domain.Frame, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	now := s.clock()
+	if s.window.Contains(now) {
+		return domain.Frame{}, ErrBlackout
+	}
+	data, err := io.ReadAll(io.LimitReader(source, frame.MaxInput+1))
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	if len(data) > frame.MaxInput {
+		return domain.Frame{}, fmt.Errorf("frame exceeds %d-byte input limit", frame.MaxInput)
+	}
+	frames, err := s.store.ListFrames(ctx, lease.ID, 1)
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	processed, err := frame.Process(bytes.NewReader(data))
+	if err != nil {
+		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "agent", Type: "frame.rejected", Payload: jsonValue(map[string]string{"error": err.Error()})})
+		return domain.Frame{}, err
+	}
+	if len(frames) > 0 && frames[0].SHA256 == processed.SHA256 {
+		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "frame.duplicate_skipped", Payload: jsonValue(map[string]string{"sha256": processed.SHA256})})
+		return frames[0], nil
+	}
+	sequence := int64(1)
+	if len(frames) > 0 {
+		sequence = frames[0].Sequence + 1
+	}
+	prefix := fmt.Sprintf("leases/%s/frames/%012d", lease.ID, sequence)
+	sourceObject, err := s.objects.Put(ctx, prefix+".source", contentType, bytes.NewReader(data))
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	if modelDriven {
+		s.mu.Lock()
+		ledger := s.ledgers[lease.ID]
+		s.mu.Unlock()
+		if err := ledger.CommitScene(); err != nil {
+			return domain.Frame{}, err
+		}
+	}
+	finalObject, err := s.objects.Put(ctx, prefix+".png", "image/png", bytes.NewReader(processed.PNG))
+	if err != nil {
+		return domain.Frame{}, err
+	}
+	record := domain.Frame{LeaseID: lease.ID, PersonaID: lease.PersonaID, Sequence: sequence, CreatedAt: now,
+		SourceObject: sourceObject.Key, FinalObject: finalObject.Key, SHA256: processed.SHA256, Width: processed.Width, Height: processed.Height}
+	publishErr := s.display.Publish(ctx, processed.PNG, time.Second)
+	record.Published = publishErr == nil
+	if publishErr != nil {
+		record.PublishError = publishErr.Error()
+	}
+	record, storeErr := s.store.AppendFrame(ctx, record)
+	if storeErr != nil {
+		return domain.Frame{}, storeErr
+	}
+	s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "agent", Type: "frame.submitted", Payload: jsonValue(record)})
+	return record, publishErr
+}
+
+func (s *Service) CreateSchedule(ctx context.Context, token string, schedule domain.Schedule) (domain.Schedule, error) {
+	lease, err := s.authorize(ctx, token)
+	if err != nil {
+		return domain.Schedule{}, err
+	}
+	if schedule.RunAt.Before(s.clock()) || !schedule.RunAt.Before(lease.EndsAt) {
+		return domain.Schedule{}, errors.New("schedule must run in the future before lease expiry")
+	}
+	if schedule.MissedPolicy != "skip" && schedule.MissedPolicy != "defer" {
+		return domain.Schedule{}, errors.New("missed_policy must be skip or defer")
+	}
+	schedule.ID = newID("schedule")
+	schedule.LeaseID = lease.ID
+	schedule.PersonaID = lease.PersonaID
+	schedule.Enabled = true
+	schedule.NextRunAt = &schedule.RunAt
+	if len(schedule.Payload) == 0 {
+		schedule.Payload = json.RawMessage(`{}`)
+	}
+	if err := s.store.CreateSchedule(ctx, schedule); err != nil {
+		return domain.Schedule{}, err
+	}
+	s.event(ctx, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "agent", Type: "schedule.created", Payload: jsonValue(schedule)})
+	return schedule, nil
+}
+
+func (s *Service) SetPersonaEnabled(ctx context.Context, id string, enabled bool) error {
+	if err := s.store.SetPersonaEnabled(ctx, id, enabled); err != nil {
+		return err
+	}
+	s.event(ctx, domain.Event{At: s.clock(), PersonaID: id, Actor: "operator", Type: "persona.enabled_override", Payload: jsonValue(map[string]bool{"enabled": enabled})})
+	if !enabled {
+		lease, err := s.store.ActiveLease(ctx)
+		if err == nil && lease != nil && lease.PersonaID == id {
+			s.stop(lease.ID)
+			_ = s.store.EndLease(ctx, lease.ID, "revoked")
+			_ = s.executor.Destroy(ctx, lease.ID)
+		}
+	}
+	return nil
+}
+
+func (s *Service) SetThinking(ctx context.Context, value string) error {
+	lease, err := s.store.ActiveLease(ctx)
+	if err != nil {
+		return err
+	}
+	if lease == nil {
+		return ErrLeaseExpired
+	}
+	profile := s.config.ModelProfiles[lease.ModelProfile]
+	if !slices.Contains(profile.Thinking.Allowed, value) {
+		return fmt.Errorf("reasoning value %q is not allowed by model profile %q", value, lease.ModelProfile)
+	}
+	if value == lease.Thinking {
+		return nil
+	}
+	s.stop(lease.ID)
+	if err := s.store.SetLeaseThinking(ctx, lease.ID, value); err != nil {
+		return err
+	}
+	s.event(ctx, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "operator", Type: "lease.reasoning_override", Payload: jsonValue(map[string]string{
+		"previous": lease.Thinking, "effective": value, "cache_impact": profile.Thinking.CacheImpact,
+	})})
+	return nil
+}
+
+func (s *Service) Revoke(ctx context.Context) error {
+	lease, err := s.store.ActiveLease(ctx)
+	if err != nil || lease == nil {
+		return err
+	}
+	s.stop(lease.ID)
+	if err := s.store.EndLease(ctx, lease.ID, "revoked"); err != nil {
+		return err
+	}
+	_ = s.executor.Destroy(ctx, lease.ID)
+	s.event(ctx, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "operator", Type: "lease.revoked", Payload: json.RawMessage(`{}`)})
+	return nil
+}
+
+func (s *Service) Store() store.Store         { return s.store }
+func (s *Service) Objects() objectstore.Store { return s.objects }
+
+func (s *Service) createLease(ctx context.Context, now time.Time) (*domain.Lease, error) {
+	personas, err := s.store.ListPersonas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	leases, err := s.store.ListLeases(ctx, 10000)
+	if err != nil {
+		return nil, err
+	}
+	seedBytes := make([]byte, 8)
+	if _, err := rand.Read(seedBytes); err != nil {
+		return nil, err
+	}
+	var seed int64
+	for _, value := range seedBytes {
+		seed = seed<<8 | int64(value)
+	}
+	decision, err := s.selectr.Select(now, seed, personas, leases)
+	if err != nil {
+		return nil, err
+	}
+	var persona domain.Persona
+	for _, candidate := range personas {
+		if candidate.ID == decision.SelectedID {
+			persona = candidate
+			break
+		}
+	}
+	duration := persona.Lease
+	if duration <= 0 {
+		duration = s.config.Scheduler.DefaultLease.Duration()
+	}
+	lease := domain.Lease{ID: newID("lease"), PersonaID: persona.ID, ModelProfile: persona.ModelProfile,
+		Thinking: persona.Thinking, StartedAt: now, EndsAt: now.Add(duration), Status: "active"}
+	token, hash, err := newToken()
+	if err != nil {
+		return nil, err
+	}
+	lease.AgentTokenHash = hash
+	if err := s.store.CreateLease(ctx, lease); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.tokens[lease.ID] = token
+	s.mu.Unlock()
+	s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "lease.selected", Payload: jsonValue(decision)})
+	return &lease, nil
+}
+
+func (s *Service) runRenderer(ctx context.Context, lease domain.Lease, schedule domain.Schedule, now time.Time) error {
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(schedule.Payload, &payload); err != nil || payload.Path == "" {
+		_ = s.store.MarkScheduleRun(ctx, lease.ID, schedule.ID, now, nil)
+		return errors.New("renderer schedule has invalid path")
+	}
+	s.mu.Lock()
+	token := s.tokens[lease.ID]
+	s.mu.Unlock()
+	_, publishErr := s.PublishPath(ctx, token, payload.Path, false)
+	next := now.Add(schedule.Interval)
+	if !next.Before(lease.EndsAt) {
+		next = time.Time{}
+	}
+	var nextPointer *time.Time
+	if !next.IsZero() {
+		nextPointer = &next
+	}
+	markErr := s.store.MarkScheduleRun(ctx, lease.ID, schedule.ID, now, nextPointer)
+	return errors.Join(publishErr, markErr)
+}
+
+func (s *Service) startWake(parent context.Context, lease domain.Lease, reason string, payload json.RawMessage) error {
+	persona, cfgPersona, err := s.persona(lease.PersonaID)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	ledger := s.ledgers[lease.ID]
+	token := s.tokens[lease.ID]
+	if _, exists := s.running[lease.ID]; exists {
+		s.mu.Unlock()
+		return nil
+	}
+	ctx, cancel := context.WithCancel(parent)
+	s.running[lease.ID] = cancel
+	s.mu.Unlock()
+
+	soul, err := os.ReadFile(filepath.Clean(cfgPersona.Soul))
+	if err != nil {
+		soul = []byte(cfgPersona.DisplayName)
+	}
+	leasePrompt := prompt.Build(prompt.Context{Lease: lease, Persona: persona, Soul: string(soul), Now: s.clock(),
+		Timezone: s.config.Timezone, BlackoutFrom: s.config.Display.Blackout.Start, BlackoutTo: s.config.Display.Blackout.End,
+		Budget: ledger.Snapshot(s.clock())})
+	if len(payload) > 0 && string(payload) != "{}" {
+		leasePrompt += "\n\nScheduled wake context:\n" + string(payload)
+	}
+	profile := s.config.ModelProfiles[lease.ModelProfile]
+	s.event(parent, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "agent.wake.started", Payload: jsonValue(map[string]string{"reason": reason})})
+	go func() {
+		err := s.runner.Run(ctx, agent.Wake{Lease: lease, Persona: persona, Profile: profile, Prompt: leasePrompt, AgentToken: token, Budget: ledger})
+		s.mu.Lock()
+		delete(s.running, lease.ID)
+		s.mu.Unlock()
+		kind := "agent.wake.completed"
+		body := map[string]string{"reason": reason}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			kind = "agent.wake.failed"
+			body["error"] = err.Error()
+		}
+		s.event(context.Background(), domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: kind, Payload: jsonValue(body)})
+	}()
+	return nil
+}
+
+func (s *Service) ensureLeaseState(ctx context.Context, lease *domain.Lease) error {
+	s.mu.Lock()
+	_, hasLedger := s.ledgers[lease.ID]
+	_, hasToken := s.tokens[lease.ID]
+	s.mu.Unlock()
+	if !hasLedger {
+		_, cfgPersona, err := s.persona(lease.PersonaID)
+		if err != nil {
+			return err
+		}
+		limits := s.config.Inference.LeaseBudget
+		if cfgPersona.BudgetOverride != nil {
+			limits = *cfgPersona.BudgetOverride
+		}
+		ledger, err := budget.New(toLimits(limits, s.config.Inference.PerCall))
+		if err != nil {
+			return err
+		}
+		requests, err := s.store.ListInferenceRequests(ctx, lease.ID, 10000)
+		if err != nil {
+			return err
+		}
+		for _, request := range requests {
+			if request.Status == "running" || request.EndedAt == nil {
+				continue
+			}
+			_ = ledger.Restore(budget.Actual{Tokens: budget.TokenUsage{Input: request.PromptTokens, Output: request.CompletionTokens,
+				Reasoning: request.ReasoningTokens, CacheRead: request.CacheReadTokens, CacheWrite: request.CacheWriteTokens},
+				Cost: budget.CostUsage{EstimatedMeteredMicros: request.EstimatedMeteredMicros,
+					ProviderReportedMicros: request.ProviderReportedMicros, ActualBilledMicros: request.ActualBilledMicros},
+				ActiveRuntime: request.EndedAt.Sub(request.StartedAt)})
+		}
+		s.mu.Lock()
+		s.ledgers[lease.ID] = ledger
+		s.mu.Unlock()
+	}
+	if !hasToken {
+		token, hash, err := newToken()
+		if err != nil {
+			return err
+		}
+		if err := s.store.SetLeaseAgentTokenHash(ctx, lease.ID, hash); err != nil {
+			return err
+		}
+		lease.AgentTokenHash = hash
+		s.mu.Lock()
+		s.tokens[lease.ID] = token
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+func (s *Service) authorize(ctx context.Context, token string) (domain.Lease, error) {
+	lease, err := s.store.ActiveLease(ctx)
+	if err != nil {
+		return domain.Lease{}, err
+	}
+	if lease == nil || !s.clock().Before(lease.EndsAt) {
+		return domain.Lease{}, ErrLeaseExpired
+	}
+	digest := sha256.Sum256([]byte(token))
+	want, err := hex.DecodeString(lease.AgentTokenHash)
+	if err != nil || len(want) != len(digest) || subtle.ConstantTimeCompare(digest[:], want) != 1 {
+		return domain.Lease{}, ErrUnauthorized
+	}
+	return *lease, nil
+}
+
+func (s *Service) persona(id string) (domain.Persona, config.Persona, error) {
+	for _, value := range s.config.Personas {
+		if value.ID == id {
+			thinking := value.Thinking
+			if thinking == "" {
+				thinking = s.config.ModelProfiles[value.ModelProfile].Thinking.Default
+			}
+			lease := value.Lease.Duration()
+			if lease <= 0 {
+				lease = s.config.Scheduler.DefaultLease.Duration()
+			}
+			cooldown := value.Cooldown.Duration()
+			if cooldown <= 0 {
+				cooldown = s.config.Scheduler.DefaultCooldown.Duration()
+			}
+			return domain.Persona{ID: value.ID, DisplayName: value.DisplayName, Enabled: value.Enabled, Weight: value.Weight,
+				Cooldown: cooldown, Lease: lease, ModelProfile: value.ModelProfile, Thinking: thinking, UpdatedAt: s.clock()}, value, nil
+		}
+	}
+	return domain.Persona{}, config.Persona{}, errors.New("persona not found in configuration")
+}
+
+func (s *Service) syncPersonas(ctx context.Context) error {
+	personas := make([]domain.Persona, 0, len(s.config.Personas))
+	for _, value := range s.config.Personas {
+		persona, _, err := s.persona(value.ID)
+		if err != nil {
+			return err
+		}
+		personas = append(personas, persona)
+	}
+	return s.store.SyncPersonas(ctx, personas)
+}
+
+func (s *Service) enforceScreen(ctx context.Context, on bool) error {
+	s.mu.Lock()
+	if s.screenState != nil && *s.screenState == on {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+	if err := s.display.SetScreen(ctx, on); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.screenState = new(bool)
+	*s.screenState = on
+	s.mu.Unlock()
+	s.event(ctx, domain.Event{At: s.clock(), Actor: "controller", Type: "display.screen", Payload: jsonValue(map[string]bool{"on": on})})
+	return nil
+}
+
+func (s *Service) setSandbox(ctx context.Context, leaseID string, running bool) error {
+	want := "suspended"
+	if running {
+		want = "running"
+	}
+	s.mu.Lock()
+	if s.sandboxState[leaseID] == want {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+	var err error
+	if running {
+		err = s.executor.Resume(ctx, leaseID)
+	} else {
+		err = s.executor.Suspend(ctx, leaseID)
+	}
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.sandboxState[leaseID] = want
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) stop(id string) {
+	s.mu.Lock()
+	cancel := s.running[id]
+	delete(s.running, id)
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) stopAll() {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.running))
+	for _, cancel := range s.running {
+		cancels = append(cancels, cancel)
+	}
+	s.running = make(map[string]context.CancelFunc)
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
+func (s *Service) isRunning(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.running[id]
+	return ok
+}
+
+func (s *Service) event(ctx context.Context, event domain.Event) {
+	if len(event.Payload) == 0 {
+		event.Payload = json.RawMessage(`{}`)
+	}
+	_, _ = s.store.AppendEvent(ctx, event)
+}
+
+func toLimits(value config.Budget, perCall config.CallLimit) budget.Limits {
+	var cost *int64
+	if value.MaxCostUSD != nil {
+		micros := int64(*value.MaxCostUSD * 1_000_000)
+		cost = &micros
+	}
+	return budget.Limits{InputTokens: value.MaxInputTokens, OutputTokens: value.MaxOutputTokens,
+		ModelCalls: value.MaxModelCalls, ActiveRuntime: value.MaxActiveRuntime.Duration(), SceneCommits: value.MaxModelSceneCommits,
+		CostMicros: cost, PerCallOutput: perCall.MaxOutputTokens}
+}
+
+func newToken() (string, string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", "", err
+	}
+	token := hex.EncodeToString(value)
+	digest := sha256.Sum256([]byte(token))
+	return token, hex.EncodeToString(digest[:]), nil
+}
+
+func newID(prefix string) string {
+	value := make([]byte, 16)
+	_, _ = rand.Read(value)
+	return prefix + "_" + hex.EncodeToString(value)
+}
+
+func jsonValue(value any) json.RawMessage {
+	encoded, _ := json.Marshal(value)
+	return encoded
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
