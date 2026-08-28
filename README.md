@@ -29,9 +29,11 @@ example values, and deployment primitives.
 - a disposable-executor contract for arbitrary commands and Docker workloads;
 - one-shot scene publishing and budget-free sampling of locally rendered files;
 - immutable source/final-frame archival to a filesystem or S3-compatible store;
-- an operator dashboard with the live canvas, stable in-place refreshes,
-  persona configuration deep dives, every controller prompt verbatim, complete
-  runtime transcripts, leases, budgets, display health, and full event history.
+- an operator interface whose primary surface is the agent's real transcript —
+  verbatim model text and full tool calls with their exact commands, inputs,
+  status and output — alongside the live canvas, truthful display state,
+  persona deep dives with every controller prompt verbatim, leases, budgets,
+  inference costs, the frame archive, and agent-authored journal history.
 
 ## Design invariants
 
@@ -67,6 +69,35 @@ deployments can select PostgreSQL, S3-compatible storage, and an HTTP display
 adapter without changing agent-facing contracts. The included compose stack is
 a deliberately inert development setup: fake display, disabled inference, and
 disabled sandbox execution.
+
+## Operator interface
+
+The interface is a Preact + TypeScript application in `web/`, built by Vite into
+content-hashed assets and embedded into the Go binary from `internal/api/dist`.
+Production runs the single static binary: no Node runtime, no asset server.
+
+```sh
+make ui     # npm ci + vite build into internal/api/dist
+make build  # frontend, then the Go binary
+```
+
+`internal/api/dist` is generated, not version controlled. A `go build` without
+the asset step still produces a working controller; the root route then explains
+that the frontend was not compiled in. Container images always build it first.
+
+With `http.auth.mode: bearer` the interface asks for the operator token on the
+first 401 and keeps it in this browser only, in session storage by default. The
+token is attached to same-origin operator API calls as an `Authorization` header,
+and mirrored into a `SameSite=Strict` cookie scoped to `/api/v1/objects` because
+`<img>` cannot send a header. With `mode: disabled` no token is ever requested,
+stored, or sent.
+
+Frontend checks:
+
+```sh
+npm --prefix web run typecheck
+npm --prefix web test
+```
 
 ## Agent tools
 

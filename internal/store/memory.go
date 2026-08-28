@@ -169,6 +169,70 @@ func (m *Memory) ListEvents(_ context.Context, limit int) ([]domain.Event, error
 	return tailReverse(m.events, limit), nil
 }
 
+// ListEventsQuery returns the slice of the event log described by query.
+// Results ascend from AfterID when that cursor is set and descend from the
+// newest matching row otherwise, matching the Postgres implementation.
+func (m *Memory) ListEventsQuery(_ context.Context, query domain.EventQuery) ([]domain.Event, error) {
+	limit := query.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	var types map[string]struct{}
+	if len(query.Types) > 0 {
+		types = make(map[string]struct{}, len(query.Types))
+		for _, value := range query.Types {
+			types[value] = struct{}{}
+		}
+	}
+	matches := func(event domain.Event) bool {
+		if query.LeaseID != "" && event.LeaseID != query.LeaseID {
+			return false
+		}
+		if query.PersonaID != "" && event.PersonaID != query.PersonaID {
+			return false
+		}
+		if query.AfterID > 0 && event.ID <= query.AfterID {
+			return false
+		}
+		if query.BeforeID > 0 && event.ID >= query.BeforeID {
+			return false
+		}
+		if types != nil {
+			if _, ok := types[event.Type]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]domain.Event, 0, min(limit, len(m.events)))
+	if query.AfterID > 0 {
+		// Forward cursor: the oldest rows past the cursor, ascending.
+		for _, event := range m.events {
+			if !matches(event) {
+				continue
+			}
+			if result = append(result, event); len(result) == limit {
+				break
+			}
+		}
+		return result, nil
+	}
+	// Newest first, walking backwards through the ascending log.
+	for index := len(m.events) - 1; index >= 0; index-- {
+		if !matches(m.events[index]) {
+			continue
+		}
+		if result = append(result, m.events[index]); len(result) == limit {
+			break
+		}
+	}
+	return result, nil
+}
+
 func (m *Memory) ListJournalEntries(_ context.Context, personaID string, limit int) ([]domain.JournalEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

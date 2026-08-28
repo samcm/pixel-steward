@@ -12,6 +12,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.7.0'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run typecheck
+      - run: npm --prefix web test
+      # The Go binary embeds internal/api/dist; build the frontend first.
+      - run: npm --prefix web run build
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

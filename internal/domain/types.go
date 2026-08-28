@@ -40,6 +40,31 @@ type Event struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
+// EventQuery selects a slice of the event log. AfterID walks forward in
+// ascending id order; BeforeID pages backward in descending id order; neither
+// set returns the newest events in descending id order.
+type EventQuery struct {
+	LeaseID   string
+	PersonaID string
+	Types     []string // exact type match; empty means every type
+	AfterID   int64    // exclusive lower bound; ascending results
+	BeforeID  int64    // exclusive upper bound; descending results
+	Limit     int      // 1..1000, defaults to 100
+}
+
+// TranscriptEventTypes are the events that belong in the operator's reading of
+// what the agent actually did. Per-frame renderer telemetry is deliberately
+// excluded: a renderer loop emits frame.submitted every second and would push
+// the model's own words out of any bounded window.
+var TranscriptEventTypes = []string{
+	"runtime.text", "runtime.tool_use", "runtime.error", "runtime.output",
+	"runtime.step_start", "runtime.step_finish",
+	"agent.prompt", "agent.wake.started", "agent.wake.completed", "agent.wake.failed",
+	"lease.selected", "lease.ended", "lease.revoked",
+	"sandbox.exec", "journal.entry", "schedule.created", "schedule.skipped",
+	"frame.rejected", "controller.tick.error",
+}
+
 // JournalEntry is the agent-authored, human-readable account of a wake. Raw
 // events remain available for diagnostics; journal entries are the durable
 // narrative that future agents and operators should read first.

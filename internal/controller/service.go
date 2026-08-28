@@ -61,17 +61,25 @@ type Service struct {
 	screenState  *bool
 }
 
+// Status separates the independent layers an operator must distinguish:
+// controller policy (Blackout, TestWindowUntil), controller intent
+// (DisplayArmed), proxy reachability (DisplayProbeError) and observed device
+// state (Display). A failed probe never rewrites the device fields, so an
+// unknown panel is reported as unknown rather than as off.
 type Status struct {
-	AsOf              time.Time        `json:"as_of"`
-	Blackout          bool             `json:"blackout"`
-	ScheduledBlackout bool             `json:"scheduled_blackout"`
-	TestWindowUntil   *time.Time       `json:"test_window_until,omitempty"`
-	NextTransition    time.Time        `json:"next_transition"`
-	Lease             *domain.Lease    `json:"lease,omitempty"`
-	Budget            *budget.Snapshot `json:"budget,omitempty"`
-	Display           display.Status   `json:"display"`
-	AgentRunning      bool             `json:"agent_running"`
-	Reasoning         *ReasoningStatus `json:"reasoning,omitempty"`
+	AsOf                time.Time        `json:"as_of"`
+	Blackout            bool             `json:"blackout"`
+	ScheduledBlackout   bool             `json:"scheduled_blackout"`
+	TestWindowUntil     *time.Time       `json:"test_window_until,omitempty"`
+	NextTransition      time.Time        `json:"next_transition"`
+	Lease               *domain.Lease    `json:"lease,omitempty"`
+	Budget              *budget.Snapshot `json:"budget,omitempty"`
+	Display             display.Status   `json:"display"`
+	DisplayArmed        bool             `json:"display_armed"`
+	DisplayProbeError   string           `json:"display_probe_error,omitempty"`
+	DisplayProbeErrorAt *time.Time       `json:"display_probe_error_at,omitempty"`
+	AgentRunning        bool             `json:"agent_running"`
+	Reasoning           *ReasoningStatus `json:"reasoning,omitempty"`
 }
 
 type ReasoningStatus struct {
@@ -287,9 +295,19 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	// A display probe failure degrades the display fields only. The operator
+	// surface must keep rendering lease, budget and policy state instead of
+	// collapsing into a single error.
 	panel, panelErr := s.display.Status(ctx)
 	status := Status{AsOf: now, Blackout: s.inBlackout(now), ScheduledBlackout: s.window.Contains(now),
 		NextTransition: s.nextTransition(now), Lease: lease, Display: panel}
+	if panelErr != nil {
+		status.DisplayProbeError = panelErr.Error()
+		status.DisplayProbeErrorAt = &now
+	}
+	s.mu.Lock()
+	status.DisplayArmed = s.screenState != nil && *s.screenState
+	s.mu.Unlock()
 	if s.testWindowActive(now) {
 		until := s.testWindowUntil
 		status.TestWindowUntil = &until
@@ -307,7 +325,7 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		profile := s.config.ModelProfiles[lease.ModelProfile]
 		status.Reasoning = &ReasoningStatus{Effective: lease.Thinking, Source: "controller_config", Allowed: profile.Thinking.Allowed, CacheImpact: profile.Thinking.CacheImpact}
 	}
-	return status, panelErr
+	return status, nil
 }
 
 func (s *Service) Budget(ctx context.Context, token string) (budget.Snapshot, domain.Lease, error) {
@@ -603,6 +621,12 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 	journal, err := s.store.ListJournalEntries(ctx, id, 1000)
 	if err != nil {
 		return PersonaDetail{}, err
+	}
+	// Keep the operator API's collection contract stable. Some stores return a
+	// nil slice when no journal rows exist, which encoding/json would expose as
+	// null and force every UI consumer to special-case an otherwise empty list.
+	if journal == nil {
+		journal = make([]domain.JournalEntry, 0)
 	}
 	inference, err := s.store.ListInferenceRequests(ctx, "", 1000)
 	if err != nil {

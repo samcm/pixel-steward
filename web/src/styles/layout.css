@@ -1,0 +1,165 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s2) var(--s4);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.wordmark .glyph {
+  width: 10px;
+  height: 10px;
+  background: var(--signal);
+  box-shadow: 0 0 0 1px var(--signal-dim);
+}
+
+.topbar .state {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.topbar .state .headline { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+.topbar .spacer { flex: 1; }
+
+.freshness {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.freshness .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.freshness.is-stale .dot { background: var(--warn); }
+.freshness.is-error .dot { background: var(--bad); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .freshness.is-live .dot { animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+}
+
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 1px;
+  background: var(--line-soft);
+  align-items: start;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line-soft);
+  position: sticky;
+  top: 41px;
+}
+
+.stage { display: flex; flex-direction: column; gap: 1px; background: var(--line-soft); min-width: 0; }
+
+/* The transcript is the live work surface, so keep it viewport-height while
+   the denser display/lease rail and archive sections continue down the page. */
+.stage > .transcript {
+  position: sticky;
+  top: 41px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 41px);
+  min-height: 420px;
+}
+
+.stage > .transcript > .panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.stage > .transcript .tr-scroll {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
+}
+
+.records { border-top: 1px solid var(--line); background: var(--bg); }
+
+.tabstrip {
+  display: flex;
+  gap: 0;
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.tabstrip button {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  padding: var(--s2) var(--s3);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.tabstrip button:hover { color: var(--ink-dim); }
+.tabstrip button[aria-selected='true'] { color: var(--signal); border-bottom-color: var(--signal); }
+
+.records-body { padding: 0; }
+
+/* The rail is sized so the 64x64 plate lands on a whole 64px multiple: 560px
+   yields the 8x anchor, 440px yields 6x, anything narrower falls back to 4x. */
+@media (min-width: 1440px) {
+  .workspace { grid-template-columns: 560px minmax(0, 1fr); }
+}
+
+@media (min-width: 1200px) and (max-width: 1439px) {
+  .workspace { grid-template-columns: 440px minmax(0, 1fr); }
+}
+
+@media (max-width: 1100px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: static; }
+  .stage > .transcript {
+    position: static;
+    height: auto;
+    min-height: 0;
+  }
+  .stage > .transcript .tr-scroll {
+    max-height: clamp(320px, 62vh, 860px);
+  }
+}
+
+@media (max-width: 700px) {
+  .topbar { flex-wrap: wrap; gap: var(--s2); padding: var(--s2) var(--s3); }
+  .topbar .spacer { display: none; }
+}

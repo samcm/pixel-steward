@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 
-tracked=$(git ls-files --cached --others --exclude-standard | grep -v '^scripts/check-public.sh$' || true)
+tracked=$(git ls-files --cached --others --exclude-standard |
+  grep -v '^scripts/check-public.sh$' |
+  while IFS= read -r path; do
+    [ -f "$path" ] && printf '%s\n' "$path"
+  done || true)
 [ -n "$tracked" ] || exit 0
 
 if printf '%s\n' "$tracked" | xargs grep -nE '(BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|api[_-]?key[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_-]{20,}|secret[_-]?key[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_/-]{20,})'; then

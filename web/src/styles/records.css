@@ -1,0 +1,513 @@
+/* records.css — the record surfaces: agent journal, frame archive, inference
+   ledger and the live lease control card. Near-black neutrals, exact 1px
+   borders, no gradients, no zebra striping. */
+
+/* ---------------------------------------------------------------- shared -- */
+
+.rec-mono {
+  font-family: var(--mono);
+}
+
+.rec-num {
+  font-family: var(--mono);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rec-tone-ok {
+  color: var(--signal);
+}
+
+.rec-tone-warn {
+  color: var(--warn);
+}
+
+.rec-tone-bad {
+  color: var(--bad);
+}
+
+.rec-tone-muted {
+  color: var(--muted);
+}
+
+.rec-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.rec-select {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 2px var(--s2);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.rec-select:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 1px;
+}
+
+button.rec-clear {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+button.rec-clear:hover {
+  color: var(--signal);
+  border-bottom-color: var(--signal-dim);
+}
+
+button.rec-clear:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------- journal -- */
+
+.journal-active {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.journal-scroll {
+  max-height: 560px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.journal-day {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: 0;
+  padding: var(--s2) 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.journal-entry {
+  border-left: 1px solid var(--signal-dim);
+  border-bottom: 1px solid var(--line-soft);
+  padding: var(--s4) 0 var(--s4) var(--s4);
+}
+
+.journal-group:last-child .journal-entry:last-child {
+  border-bottom: 0;
+}
+
+.journal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+
+button.journal-persona {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--signal-dim);
+  border-radius: 0;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button.journal-persona:hover {
+  color: var(--signal);
+  border-bottom-color: var(--signal);
+}
+
+button.journal-persona:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.journal-prose {
+  margin: 0;
+  max-width: 72ch;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------- frame archive -- */
+
+.frames-strip {
+  display: flex;
+  gap: var(--s3);
+  overflow-x: auto;
+  padding-bottom: var(--s2);
+  scroll-snap-type: x proximity;
+}
+
+.frame-cell {
+  flex: 0 0 auto;
+  width: 128px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  scroll-snap-align: start;
+}
+
+button.frame-thumb {
+  display: block;
+  width: 128px;
+  height: 128px;
+  padding: 0;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+button.frame-thumb[aria-pressed='true'] {
+  border-color: var(--signal);
+}
+
+button.frame-thumb:hover {
+  border-color: var(--signal-dim);
+}
+
+button.frame-thumb:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.frame-img {
+  display: block;
+  width: 128px;
+  height: 128px;
+  image-rendering: pixelated;
+}
+
+.frame-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.frame-seq {
+  color: var(--ink);
+}
+
+.frame-persona {
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frame-mark-warn {
+  color: var(--warn);
+}
+
+.frame-mark-bad {
+  color: var(--bad);
+  cursor: help;
+}
+
+a.frame-open {
+  align-self: flex-start;
+  margin-top: var(--s1);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-decoration: none;
+}
+
+a.frame-open:hover {
+  color: var(--signal);
+  border-bottom-color: var(--signal-dim);
+}
+
+a.frame-open:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------ inference ledger -- */
+
+.ledger-scroll {
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}
+
+table.ledger {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+
+.ledger th,
+.ledger td {
+  padding: var(--s1) var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.ledger thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.ledger th.rec-num,
+.ledger td.rec-num {
+  text-align: right;
+}
+
+/* Cell tones must outrank the `.ledger td` base colour. */
+.ledger td.rec-tone-ok {
+  color: var(--signal);
+}
+
+.ledger td.rec-tone-warn {
+  color: var(--warn);
+}
+
+.ledger td.rec-tone-bad {
+  color: var(--bad);
+}
+
+.ledger td.rec-tone-muted {
+  color: var(--muted);
+}
+
+.ledger .ledger-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.ledger thead th.ledger-sticky {
+  z-index: 4;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.ledger tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  color: var(--ink);
+}
+
+.ledger tfoot td.ledger-sticky {
+  z-index: 5;
+}
+
+.ledger-raw td {
+  padding: 0 var(--s3) var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line);
+  white-space: normal;
+}
+
+.ledger-raw-inner {
+  position: sticky;
+  left: 0;
+  max-width: 720px;
+}
+
+/* ------------------------------------------------------------ lease card -- */
+
+.lease {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.lease-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.lease-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+}
+
+button.lease-persona {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--signal-dim);
+  border-radius: 0;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+button.lease-persona:hover {
+  color: var(--signal);
+  border-bottom-color: var(--signal);
+}
+
+button.lease-persona:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.lease-window {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.lease-remaining {
+  color: var(--ink);
+}
+
+.lease-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--s4);
+}
+
+.lease-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.lease-model-id {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.lease-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.lease-status {
+  min-height: 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.lease-error {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
+.lease-meters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.lease-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line-soft);
+}
+
+.lease-note {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lease-status[data-pending='true'] {
+    animation: rec-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes rec-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}

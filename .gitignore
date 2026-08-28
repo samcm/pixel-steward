@@ -9,3 +9,6 @@
 data/
 .env
 *.local.yaml
+/web/node_modules/
+/internal/api/dist/*
+!/internal/api/dist/.gitkeep

@@ -1,0 +1,642 @@
+/* Persona roster, inference route table and the persona deep dive.
+ *
+ * The shared utility classes below (.mono, .muted, .hint, .label, .link, .tag,
+ * .ok/.warn/.bad, .prose, .num) are re-stated at :where() specificity and scoped
+ * to these three roots. They use the same tokens as the design system, so when
+ * the shared sheets define them the shared definition wins on cascade order;
+ * when they do not, these components still render correctly. */
+
+:where(.personas-panel, .routes-panel, .dd) .mono {
+  font-family: var(--mono);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .muted {
+  color: var(--muted);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .hint {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-weight: 400;
+}
+
+:where(.personas-panel, .routes-panel, .dd) .prose {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .ok {
+  color: var(--signal);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .warn {
+  color: var(--warn);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .bad {
+  color: var(--bad);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.personas-panel, .routes-panel, .dd) .sep {
+  color: var(--line);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .link {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.personas-panel, .routes-panel, .dd) .link:hover {
+  color: var(--signal);
+  border-bottom-color: var(--signal-dim);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .link:focus-visible,
+:where(.personas-panel, .routes-panel, .dd) button:focus-visible,
+:where(.personas-panel, .routes-panel, .dd) a:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* --- shared tags ------------------------------------------------------- */
+
+:where(.personas-panel, .routes-panel, .dd) .tag {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+:where(.personas-panel, .routes-panel, .dd) .tag-active,
+:where(.personas-panel, .routes-panel, .dd) .tag-ok {
+  color: var(--signal);
+  border-color: var(--signal-dim);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .tag-warn {
+  color: var(--warn);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .tag-bad {
+  color: var(--bad);
+}
+
+:where(.personas-panel, .routes-panel, .dd) .tag-off,
+:where(.personas-panel, .routes-panel, .dd) .tag-quiet {
+  color: var(--muted);
+  border-color: var(--line-soft);
+}
+
+/* --- shared tables ----------------------------------------------------- */
+
+.personas-table,
+.routes-table,
+.dd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.personas-table th,
+.routes-table th,
+.dd-table th {
+  padding: var(--s1) var(--s2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.personas-table td,
+.routes-table td,
+.dd-table td {
+  padding: var(--s2);
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--ink-dim);
+}
+
+.personas-table tbody tr:first-child td,
+.routes-table tbody tr:first-child td,
+.dd-table tbody tr:first-child td {
+  border-top: 0;
+}
+
+.personas-table tbody tr:hover,
+.routes-table tbody tr:hover,
+.dd-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.personas-table th.num,
+.routes-table th.num,
+.dd-table th.num {
+  text-align: right;
+}
+
+.join-note {
+  border-bottom: 1px dotted var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: help;
+}
+
+/* --- personas ---------------------------------------------------------- */
+
+.personas-meta,
+.routes-meta {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.personas-table .persona-row > td:first-child,
+.routes-table .route-row > td:first-child {
+  border-left: 2px solid transparent;
+}
+
+.personas-table .persona-row.is-active > td:first-child,
+.routes-table .route-row.is-bound > td:first-child {
+  border-left-color: var(--signal);
+}
+
+.personas-table .persona-row.is-off {
+  color: var(--muted);
+  opacity: 0.62;
+}
+
+.persona-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.persona-id {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.personas-table .col-persona {
+  min-width: 20ch;
+}
+
+.personas-table .col-assignment {
+  width: 46%;
+}
+
+.personas-table .col-weight {
+  width: 6ch;
+}
+
+.personas-table .col-action {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.route-target {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.route-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+
+.source-active_lease {
+  color: var(--signal);
+}
+
+.source-latest_lease {
+  color: var(--signal-dim);
+}
+
+.source-default_route {
+  color: var(--muted);
+}
+
+.source-unknown {
+  color: var(--warn);
+}
+
+/* --- routes ------------------------------------------------------------ */
+
+.routes-table .col-mark {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.routes-table .col-route,
+.routes-table .col-model,
+.routes-table .col-credential {
+  overflow-wrap: anywhere;
+}
+
+.routes-table .col-mark .tag + .tag {
+  margin-left: var(--s1);
+}
+
+.routes-table .endpoint {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+
+.routes-table .env-name {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.routes-table .rates {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+
+.routes-table .col-reasoning .hint {
+  margin-top: 2px;
+}
+
+/* --- deep dive shell --------------------------------------------------- */
+
+.dd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-height: 0;
+}
+
+.dd-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.dd-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  margin-bottom: -1px;
+  padding: var(--s2) var(--s3);
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dd-tab:hover {
+  color: var(--ink-dim);
+}
+
+.dd-tab.is-selected {
+  color: var(--ink);
+  border-bottom-color: var(--signal);
+}
+
+.dd-tab-count {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.dd-panel {
+  overflow: auto;
+  min-height: 0;
+  max-height: min(62vh, 660px);
+  padding-right: var(--s2);
+}
+
+.dd-panel:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.dd-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.dd-section > .label {
+  display: block;
+  margin-bottom: var(--s2);
+}
+
+.dd-section .hint {
+  margin: var(--s2) 0 0;
+  max-width: 78ch;
+  line-height: 1.5;
+}
+
+.warn-strip {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--warn);
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.dd-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.dd-config-group h4 {
+  margin: 0 0 var(--s1);
+}
+
+/* --- deep dive rows ---------------------------------------------------- */
+
+.dd-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.dd-row {
+  padding: var(--s3);
+  border: 1px solid var(--line-soft);
+}
+
+.dd-row-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+
+.dd-row-head .time {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.dd-row-head .actor {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.dd-row-head .t-title {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.dd-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.dd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 2px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toggle.is-on {
+  color: var(--ink);
+  border-color: var(--signal-dim);
+}
+
+.dd-t {
+  padding-left: var(--s3);
+  border-left: 1px solid var(--line);
+}
+
+.dd-t.is-demoted {
+  opacity: 0.7;
+}
+
+.dd-t-text {
+  border-left-color: var(--signal-dim);
+}
+
+.dd-t-error {
+  border-left-color: var(--bad);
+}
+
+.dd-t-journal {
+  border-left-color: var(--ink-dim);
+}
+
+.t-body {
+  margin: 0 0 var(--s2);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dd-t-text .t-body {
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.t-tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.t-tool-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.t-tool .tool-name {
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.t-tool .label {
+  display: block;
+}
+
+/* --- deep dive tables, frames, journal --------------------------------- */
+
+.dd-table .cell-prose {
+  max-width: 34ch;
+  font-family: var(--sans);
+  color: var(--ink);
+  white-space: normal;
+}
+
+.dd-table .truncate {
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dd-table tfoot td {
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.dd-table tfoot tr:hover {
+  background: transparent;
+}
+
+.frame-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: var(--s4);
+}
+
+.frame-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin: 0;
+}
+
+.frame-cell > a {
+  display: block;
+  width: 128px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  line-height: 0;
+}
+
+.frame-thumb {
+  display: block;
+  width: 128px;
+  height: 128px;
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+
+.frame-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+
+.dd-journal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.journal-entry {
+  padding-left: var(--s3);
+  border-left: 1px solid var(--line-soft);
+}
+
+.journal-head {
+  margin-bottom: var(--s1);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.journal-entry .prose {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* --- responsive -------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .personas-table,
+  .routes-table,
+  .dd-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .dd-panel {
+    max-height: 70vh;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dd-tab,
+  .toggle,
+  .personas-table tbody tr,
+  .routes-table tbody tr,
+  .dd-table tbody tr,
+  :where(.personas-panel, .routes-panel, .dd) .link {
+    transition: color 120ms linear, background-color 120ms linear, border-color 120ms linear;
+  }
+}

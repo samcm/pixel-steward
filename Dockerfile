@@ -1,8 +1,16 @@
+FROM node:24.7.0-bookworm-slim AS frontend
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN rm -rf /internal/api/dist && npm run build
+
 FROM golang:1.25.0-bookworm AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=frontend /internal/api/dist ./internal/api/dist
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/pixel-steward ./cmd/pixel-steward
 

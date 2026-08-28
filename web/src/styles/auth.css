@@ -1,0 +1,160 @@
+/* Operator token gate and its top-bar indicator. Only reachable when the
+   controller runs http.auth.mode: bearer; auth-disabled deployments render
+   none of this. */
+
+.auth-scrim {
+  position: fixed;
+  inset: 0;
+  /* Above the record modal (z-index 100): nothing behind this can be used. */
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5) var(--s4);
+  overflow: auto;
+  background: rgba(4, 6, 5, 0.88);
+}
+
+.auth-gate {
+  width: min(360px, 100%);
+  padding: var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.auth-title {
+  font: 13px/1.3 var(--mono);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+
+.auth-note {
+  margin-top: var(--s2);
+  font: 11px/1.5 var(--mono);
+  color: var(--muted);
+}
+
+.auth-reject {
+  margin-top: var(--s3);
+  padding: var(--s2);
+  font: 11px/1.4 var(--mono);
+  color: var(--bad);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 1px solid var(--bad);
+  border-radius: var(--r);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.auth-field input {
+  width: 100%;
+  padding: 5px 7px;
+  font: 12px/1.4 var(--mono);
+  letter-spacing: 0.12em;
+}
+
+.auth-field input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+
+.auth-scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin: 0;
+  padding: var(--s2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+}
+
+.auth-scope legend {
+  padding: 0 var(--s1);
+}
+
+.auth-scope label {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font: 11px/1.4 var(--mono);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.auth-scope label:hover {
+  color: var(--ink);
+}
+
+.auth-scope input[type='radio'] {
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--signal);
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s3);
+}
+
+.auth-actions button[type='submit'] {
+  border-color: var(--signal-dim);
+  color: var(--signal);
+}
+
+.auth-actions button[type='submit']:disabled {
+  border-color: var(--line);
+  color: var(--ink-dim);
+}
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding-left: var(--s3);
+  border-left: 1px solid var(--line);
+}
+
+.auth-status .auth-mask {
+  font: 11px/1.3 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+/* Scoped rather than global: base.css already owns the app-wide ring and this
+   file must not restate it with a different offset. */
+.auth-gate :focus-visible,
+.auth-status :focus-visible {
+  outline: 1px solid var(--signal);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .auth-field input,
+  .auth-actions button {
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+}
+
+@media (max-width: 700px) {
+  .auth-scrim {
+    padding: var(--s4) var(--s2);
+    align-items: flex-start;
+  }
+}

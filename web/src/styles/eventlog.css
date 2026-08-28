@@ -1,0 +1,227 @@
+/* eventlog.css — the global raw event log: every controller event, newest
+   first, human sentence in front and the verbatim payload one disclosure away.
+   Same near-black neutrals as the other record surfaces: exact 1px rules, no
+   zebra striping, no rounded cells. Mono carries identifiers and timestamps,
+   the proportional face carries the activity sentence. */
+
+.eventlog :focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------- filters -- */
+
+.eventlog .ev-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.eventlog input.ev-search {
+  flex: 1 1 120px;
+  min-width: 96px;
+  max-width: 200px;
+}
+
+.eventlog button.ev-toggle {
+  padding: 2px var(--s2);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* Pressed is the default quiet state; released means the per-second renderer
+   firehose is in the table, which is worth flagging. */
+.eventlog button.ev-toggle[aria-pressed='false'] {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  color: var(--warn);
+}
+
+.eventlog .ev-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s3);
+  margin-top: var(--s2);
+}
+
+/* --------------------------------------------------------------- table -- */
+
+.eventlog .ev-scroll {
+  max-width: 100%;
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}
+
+.eventlog table.ev-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+
+.eventlog .ev-table th,
+.eventlog .ev-table td {
+  padding: var(--s1) var(--s2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  color: var(--ink-dim);
+}
+
+.eventlog .ev-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.eventlog .ev-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Time is content width; everything else shares what is left, and wraps rather
+   than pushing the table sideways on a phone. */
+.eventlog .ev-head-time,
+.eventlog .ev-time {
+  width: 1%;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.eventlog .ev-persona {
+  font-family: var(--mono);
+}
+
+.eventlog .ev-type {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+/* Shown only where the type column collapses; never both at once. */
+.eventlog .ev-type-inline {
+  display: none;
+}
+
+.eventlog button.ev-persona-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.eventlog button.ev-persona-link:hover {
+  color: var(--signal);
+}
+
+.eventlog .ev-system {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------ activity -- */
+
+.eventlog .ev-title {
+  display: block;
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.eventlog .ev-detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-top: 2px;
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.eventlog .ev-detail.is-machine {
+  font-family: var(--mono);
+}
+
+.eventlog .ev-row.is-error td,
+.eventlog .ev-row.is-error .ev-title,
+.eventlog .ev-row.is-error .ev-detail {
+  color: var(--bad);
+}
+
+.eventlog .ev-row.is-error {
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
+}
+
+/* ------------------------------------------------------------- details -- */
+
+.eventlog .ev-details .disclosure {
+  border-top: 0;
+  margin-top: 0;
+}
+
+.eventlog .ev-details .disclosure > summary {
+  white-space: nowrap;
+}
+
+.eventlog .ev-details .code {
+  margin: var(--s1) 0 0;
+  max-width: 380px;
+  max-height: 260px;
+}
+
+@media (max-width: 560px) {
+  .eventlog input.ev-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  /* Five mono columns do not fit a phone. The type moves into the sentence
+     cell rather than off the screen: nothing here is ever unreachable. */
+  .eventlog .ev-head-type,
+  .eventlog .ev-type {
+    display: none;
+  }
+
+  .eventlog .ev-type-inline {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  /* The two flexible columns share what a 390px phone leaves after the time
+     and persona cells, so an opened payload never forces a sideways scroll. */
+  .eventlog .ev-activity {
+    min-width: 110px;
+  }
+
+  .eventlog .ev-details:has(details[open]) {
+    min-width: 120px;
+  }
+
+  .eventlog .ev-table th,
+  .eventlog .ev-table td {
+    padding: var(--s1) 6px;
+  }
+
+  .eventlog .ev-details .code {
+    max-width: none;
+  }
+}

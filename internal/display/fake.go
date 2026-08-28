@@ -35,7 +35,8 @@ func (f *Fake) Publish(_ context.Context, png []byte, _ time.Duration) error {
 	f.hasFrame = true
 	f.status.ScreenOn = true
 	f.status.Frames++
-	f.status.LastFrameAt = time.Now().UTC()
+	at := time.Now().UTC()
+	f.status.LastFrameAt = &at
 	f.status.LastError = ""
 
 	return nil
@@ -53,7 +54,9 @@ func (f *Fake) Status(_ context.Context) (Status, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	return f.status, nil
+	status := f.status
+	status.CheckedAt = time.Now().UTC()
+	return status, nil
 }
 
 func (f *Fake) LastPNG() []byte {

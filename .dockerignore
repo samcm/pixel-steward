@@ -6,3 +6,5 @@ config.yaml
 !cmd/
 !cmd/pixel-steward/
 !cmd/pixel-steward/**
+web/node_modules
+internal/api/dist

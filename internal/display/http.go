@@ -22,9 +22,11 @@ type HTTP struct {
 	baseURL string
 	client  *http.Client
 
-	mu       sync.Mutex
-	lastSend time.Time
-	minimum  time.Duration
+	mu          sync.Mutex
+	lastSend    time.Time
+	minimum     time.Duration
+	lastError   string
+	lastErrorAt time.Time
 }
 
 func NewHTTP(baseURL string, maxFPS float64) (*HTTP, error) {
@@ -129,11 +131,12 @@ func (h *HTTP) Status(ctx context.Context) (Status, error) {
 
 	var raw struct {
 		Device struct {
-			Online    bool      `json:"online"`
-			LastError string    `json:"last_error"`
-			Frames    uint64    `json:"frames"`
-			Skipped   uint64    `json:"skipped"`
-			LastOK    time.Time `json:"last_ok"`
+			Online      bool      `json:"online"`
+			LastError   string    `json:"last_error"`
+			LastErrorAt time.Time `json:"last_error_at"`
+			Frames      uint64    `json:"frames"`
+			Skipped     uint64    `json:"skipped"`
+			LastOK      time.Time `json:"last_ok"`
 		} `json:"device"`
 		ScreenOn  *bool `json:"screen_on"`
 		ScreenOff *bool `json:"screen_off"`
@@ -148,12 +151,54 @@ func (h *HTTP) Status(ctx context.Context) (Status, error) {
 	} else if raw.ScreenOff != nil {
 		screenOn = !*raw.ScreenOff
 	}
-	return Status{
+	now := time.Now().UTC()
+	status := Status{
 		Online:      raw.Device.Online,
 		ScreenOn:    screenOn,
-		LastFrameAt: raw.Device.LastOK,
+		LastFrameAt: optionalTime(raw.Device.LastOK),
 		LastError:   raw.Device.LastError,
+		CheckedAt:   now,
 		Frames:      raw.Device.Frames,
 		Skipped:     raw.Device.Skipped,
-	}, nil
+	}
+	// device.last_error_at is authoritative when the proxy supplies it: it is the
+	// real age of the fault, which can be hours older than the first poll that
+	// observed it. observeError still runs on every poll so its bookkeeping stays
+	// honest -- an empty message clears the remembered error, so a later
+	// recurrence earns a fresh fallback timestamp instead of inheriting the old
+	// one. The fallback fills only a genuine gap.
+	fallback := h.observeError(raw.Device.LastError, now)
+	if authoritative := optionalTime(raw.Device.LastErrorAt); authoritative != nil && status.LastError != "" {
+		status.LastErrorAt = authoritative
+	} else {
+		status.LastErrorAt = fallback
+	}
+	return status, nil
+}
+
+// optionalTime drops a zero timestamp so the operator surface can tell
+// "never" apart from the epoch.
+func optionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
+// observeError timestamps the first sighting of each distinct device error so
+// the operator UI can age it. It is the fallback for proxies that report the
+// error text without a device.last_error_at, and it runs on every poll to keep
+// that fallback honest across clear-and-recur cycles.
+func (h *HTTP) observeError(message string, now time.Time) *time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if message == "" {
+		h.lastError, h.lastErrorAt = "", time.Time{}
+		return nil
+	}
+	if message != h.lastError {
+		h.lastError, h.lastErrorAt = message, now
+	}
+	at := h.lastErrorAt
+	return &at
 }

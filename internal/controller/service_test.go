@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -180,6 +181,21 @@ func TestAgentWritesCuratedJournalEntry(t *testing.T) {
 	}
 }
 
+func TestPersonaDetailReturnsEmptyCollectionsAsArrays(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	service := testService(t, &now, agent.Disabled{}, display.NewFake())
+
+	detail, err := service.PersonaDetail(context.Background(), "persona")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Leases == nil || detail.Events == nil || detail.Prompts == nil || detail.Transcript == nil ||
+		detail.Frames == nil || detail.Journal == nil || detail.Inference == nil || detail.Schedules == nil {
+		t.Fatalf("persona detail contains a nil collection: %+v", detail)
+	}
+}
+
 func TestExpiringTestWindowTemporarilyOverridesBlackout(t *testing.T) {
 	location, _ := time.LoadLocation("Australia/Brisbane")
 	now := time.Date(2026, 8, 28, 22, 0, 0, 0, location)
@@ -256,4 +272,56 @@ func testService(t *testing.T, now *time.Time, runner agent.Runner, panel displa
 		t.Fatal(err)
 	}
 	return service
+}
+
+type failingPanel struct {
+	*display.Fake
+	err error
+}
+
+func (p failingPanel) Status(ctx context.Context) (display.Status, error) {
+	if p.err != nil {
+		return display.Status{}, p.err
+	}
+	return p.Fake.Status(ctx)
+}
+
+// A display proxy outage must degrade only the display fields. The operator
+// surface still needs lease, policy and budget state, and it must be able to
+// tell "we could not ask the panel" apart from "the panel is off".
+func TestStatusSurvivesDisplayProbeFailure(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := failingPanel{Fake: display.NewFake(), err: errors.New("dial tcp: connection refused")}
+	service := testService(t, &now, &blockingRunner{done: make(chan struct{})}, panel)
+
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status must not fail when the display probe fails: %v", err)
+	}
+	if status.DisplayProbeError == "" || status.DisplayProbeErrorAt == nil {
+		t.Fatalf("probe failure was not reported: %+v", status)
+	}
+	if status.Lease == nil || status.Budget == nil {
+		t.Fatalf("lease and budget were dropped by a display failure: %+v", status)
+	}
+	if !status.DisplayArmed {
+		t.Fatalf("daylight should report the panel as armed: %+v", status)
+	}
+}
+
+// The panel reports an error string without a time. The adapter timestamps the
+// first sighting so the UI can age it instead of implying a live outage.
+func TestFakeStatusCarriesProbeTime(t *testing.T) {
+	panel := display.NewFake()
+	status, err := panel.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.CheckedAt.IsZero() {
+		t.Fatal("display status must record when it was observed")
+	}
 }

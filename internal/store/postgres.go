@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -292,6 +293,64 @@ func (p *Postgres) ListEvents(ctx context.Context, limit int) ([]domain.Event, e
 	return result, rows.Err()
 }
 
+// ListEventsQuery is the Postgres twin of Memory.ListEventsQuery and must keep
+// identical semantics. Every filter value travels as a numbered placeholder so
+// no caller-supplied string ever reaches the SQL text.
+func (p *Postgres) ListEventsQuery(ctx context.Context, query domain.EventQuery) ([]domain.Event, error) {
+	limit := query.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	conditions := make([]string, 0, 5)
+	args := make([]any, 0, 6)
+	placeholder := func(value any) string {
+		args = append(args, value)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if query.LeaseID != "" {
+		conditions = append(conditions, "lease_id="+placeholder(query.LeaseID))
+	}
+	if query.PersonaID != "" {
+		conditions = append(conditions, "persona_id="+placeholder(query.PersonaID))
+	}
+	if len(query.Types) > 0 {
+		conditions = append(conditions, "type = ANY("+placeholder(query.Types)+")")
+	}
+	if query.AfterID > 0 {
+		conditions = append(conditions, "id > "+placeholder(query.AfterID))
+	}
+	if query.BeforeID > 0 {
+		conditions = append(conditions, "id < "+placeholder(query.BeforeID))
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	// A forward cursor reads the oldest rows past it; everything else reads the
+	// newest rows first.
+	order := " ORDER BY id DESC LIMIT "
+	if query.AfterID > 0 {
+		order = " ORDER BY id ASC LIMIT "
+	}
+	statement := `SELECT id,at,lease_id,persona_id,actor,type,correlation_id,payload FROM events` +
+		where + order + placeholder(limit)
+	rows, err := p.pool.Query(ctx, statement, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.Event, 0, limit)
+	for rows.Next() {
+		var event domain.Event
+		if err := rows.Scan(&event.ID, &event.At, &event.LeaseID, &event.PersonaID, &event.Actor, &event.Type,
+			&event.CorrelationID, &event.Payload); err != nil {
+			return nil, err
+		}
+		result = append(result, event)
+	}
+	return result, rows.Err()
+}
+
 func (p *Postgres) ListJournalEntries(ctx context.Context, personaID string, limit int) ([]domain.JournalEntry, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 1000
@@ -432,9 +491,15 @@ func (p *Postgres) DeleteSchedule(ctx context.Context, leaseID, id string) error
 	return err
 }
 
+// markScheduleRunSQL binds $4 as timestamptz explicitly. Without the casts the
+// parameter appears only as a bare assignment target and inside IS NOT NULL, so
+// PostgreSQL cannot infer its type and every scheduler tick fails with
+// "could not determine data type of parameter $4". Do not drop the casts.
+const markScheduleRunSQL = `UPDATE schedules SET last_run_at=$3,next_run_at=$4::timestamptz,enabled=($4::timestamptz IS NOT NULL)
+    WHERE id=$1 AND lease_id=$2`
+
 func (p *Postgres) MarkScheduleRun(ctx context.Context, leaseID, id string, ranAt time.Time, next *time.Time) error {
-	tag, err := p.pool.Exec(ctx, `UPDATE schedules SET last_run_at=$3,next_run_at=$4,enabled=($4 IS NOT NULL)
-    WHERE id=$1 AND lease_id=$2`, id, leaseID, ranAt, next)
+	tag, err := p.pool.Exec(ctx, markScheduleRunSQL, id, leaseID, ranAt, next)
 	if err == nil && tag.RowsAffected() == 0 {
 		return errors.New("schedule not found")
 	}

@@ -1,13 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
-	_ "embed"
+	"crypto/subtle"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -18,8 +22,12 @@ import (
 	"github.com/samcm/pixel-steward/internal/domain"
 )
 
-//go:embed ui.html
-var userInterface []byte
+// dist holds the compiled operator frontend. It is produced by `make ui`
+// (Vite) and by the Docker frontend stage, and is embedded so production needs
+// no Node runtime and no separate asset server.
+//
+//go:embed all:dist
+var userInterface embed.FS
 
 type Server struct {
 	service       *controller.Service
@@ -46,10 +54,7 @@ func NewServer(service *controller.Service, cfg config.HTTP) (*Server, error) {
 func (s *Server) Handler() http.Handler { return s.mux }
 
 func (s *Server) routes() {
-	s.mux.HandleFunc("GET /", func(response http.ResponseWriter, _ *http.Request) {
-		response.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = response.Write(userInterface)
-	})
+	s.mux.Handle("GET /", staticAssets())
 	s.mux.Handle("GET /api/v1/status", s.operator(http.HandlerFunc(s.status)))
 	s.mux.Handle("GET /api/v1/personas", s.operator(http.HandlerFunc(s.personas)))
 	s.mux.Handle("GET /api/v1/personas/{id}", s.operator(http.HandlerFunc(s.persona)))
@@ -73,6 +78,54 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /agent/v1/watch", s.agentWatch)
 	s.mux.HandleFunc("POST /agent/v1/schedules", s.agentSchedule)
 }
+
+// staticAssets serves the embedded frontend. Content-hashed files under
+// /assets are immutable; index.html must always be revalidated so a new
+// deployment is picked up on the next load. Unknown paths fall back to
+// index.html so client-side routes survive a refresh, except under /api/ and
+// /agent/ where a miss is a JSON 404 rather than a 200 of HTML.
+func staticAssets() http.Handler {
+	assets, subErr := fs.Sub(userInterface, "dist")
+	var index []byte
+	if subErr == nil {
+		index, _ = fs.ReadFile(assets, "index.html")
+	}
+	if index == nil {
+		return http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			response.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(response, notBuilt)
+		})
+	}
+	files := http.FileServer(http.FS(assets))
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		path := strings.TrimPrefix(request.URL.Path, "/")
+		if path != "" && path != "index.html" {
+			if info, statErr := fs.Stat(assets, path); statErr == nil && !info.IsDir() {
+				if strings.HasPrefix(path, "assets/") {
+					response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				files.ServeHTTP(response, request)
+				return
+			}
+		}
+		// An unmatched API route must fail as JSON, not as a 200 carrying the
+		// SPA shell that a client would then try to parse as data.
+		if strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/agent/") {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(response, `{"error":"not found"}`)
+			return
+		}
+		response.Header().Set("Content-Type", "text/html; charset=utf-8")
+		response.Header().Set("Cache-Control", "no-cache")
+		http.ServeContent(response, request, "index.html", time.Time{}, bytes.NewReader(index))
+	})
+}
+
+const notBuilt = "The operator frontend was not compiled into this binary.\n" +
+	"Build it with `make ui` (or `npm --prefix web ci && npm --prefix web run build`) and rebuild the binary.\n" +
+	"Container images always include it; this only happens for a local `go build` without the asset step.\n"
 
 func (s *Server) status(response http.ResponseWriter, request *http.Request) {
 	value, err := s.service.Status(request.Context())
@@ -128,8 +181,38 @@ func (s *Server) leases(response http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) events(response http.ResponseWriter, request *http.Request) {
-	value, err := s.service.Store().ListEvents(request.Context(), limit(request))
+	value, err := s.service.Store().ListEventsQuery(request.Context(), parseEventQuery(request))
 	writeJSON(response, value, err)
+}
+
+// parseEventQuery reads the optional event filters off the URL. Every
+// parameter is additive: a request without any of them still asks for the
+// newest `limit` events in descending id order, exactly as before.
+func parseEventQuery(request *http.Request) domain.EventQuery {
+	params := request.URL.Query()
+	query := domain.EventQuery{
+		LeaseID:   params.Get("lease_id"),
+		PersonaID: params.Get("persona_id"),
+		AfterID:   eventCursor(params.Get("after_id")),
+		BeforeID:  eventCursor(params.Get("before_id")),
+		Limit:     limit(request),
+	}
+	// Only `transcript` narrows the type set; an absent or unrecognised scope
+	// keeps the unfiltered log so a typo cannot silently hide events.
+	if params.Get("scope") == "transcript" {
+		query.Types = domain.TranscriptEventTypes
+	}
+	return query
+}
+
+// eventCursor ignores unparseable and negative cursors rather than failing the
+// request; the store treats a zero cursor as "not set".
+func eventCursor(value string) int64 {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
 }
 
 func (s *Server) journal(response http.ResponseWriter, request *http.Request) {
@@ -262,14 +345,36 @@ func (s *Server) agentSchedule(response http.ResponseWriter, request *http.Reque
 	writeJSON(response, value, err)
 }
 
+// operatorCookie carries the operator token for requests a browser cannot send
+// a header on, specifically <img src> against /api/v1/objects. It is written by
+// the operator interface with SameSite=Strict, which is what prevents another
+// site from using it for a forged request.
+const operatorCookie = "pixel_steward_operator"
+
 func (s *Server) operator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if s.operatorToken != "" && bearer(request) != s.operatorToken {
+		if s.operatorToken != "" && !s.authorized(request) {
 			http.Error(response, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func (s *Server) authorized(request *http.Request) bool {
+	expected := []byte(s.operatorToken)
+	if subtle.ConstantTimeCompare([]byte(bearer(request)), expected) == 1 {
+		return true
+	}
+	cookie, err := request.Cookie(operatorCookie)
+	if err != nil {
+		return false
+	}
+	value, err := url.QueryUnescape(cookie.Value)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(value), expected) == 1
 }
 
 func bearer(request *http.Request) string {

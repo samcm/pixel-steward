@@ -22,6 +22,7 @@ type Store interface {
 
 	AppendEvent(context.Context, domain.Event) (domain.Event, error)
 	ListEvents(context.Context, int) ([]domain.Event, error)
+	ListEventsQuery(context.Context, domain.EventQuery) ([]domain.Event, error)
 	ListJournalEntries(context.Context, string, int) ([]domain.JournalEntry, error)
 	AppendFrame(context.Context, domain.Frame) (domain.Frame, error)
 	ListFrames(context.Context, string, int) ([]domain.Frame, error)

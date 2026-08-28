@@ -1,0 +1,479 @@
+/* Live transcript: the primary operator surface. Dense, near-black, one accent.
+   Prose in --sans, everything machine-generated in --mono. */
+
+.transcript .tr-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: var(--s3);
+}
+
+.transcript .tr-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.transcript .tr-pick { min-width: 0; }
+
+
+.transcript .tr-pick select {
+  max-width: min(34ch, 100%);
+  text-overflow: ellipsis;
+  padding: 2px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.transcript .tr-toggle {
+  padding: 2px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.transcript .tr-toggle[aria-pressed='true'] {
+  border-color: var(--signal-dim);
+  color: var(--signal);
+}
+
+.transcript .tr-count {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tr-historical {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--warn);
+  border-radius: var(--r);
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.tr-historical code {
+  color: var(--ink-dim);
+  font-family: var(--mono);
+}
+
+.tr-historical button {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: transparent;
+  padding: 2px var(--s2);
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* Scroll container. The transcript owns its own scrollport so polls never
+   reset the operator's position. */
+.tr-scroll {
+  max-height: clamp(320px, 62vh, 860px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.tr-scroll:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: -1px;
+}
+
+.tr-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tr-row {
+  display: grid;
+  grid-template-columns: 7ch minmax(0, 1fr);
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.tr-row:first-child {
+  border-top: 0;
+}
+
+.tr-when {
+  padding-top: 1px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/* The model speaking: the one place with generous prose measure. */
+.tr-say {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tr-journal {
+  border-left: 2px solid var(--signal);
+  padding-left: var(--s3);
+}
+
+.tr-journal p {
+  margin: 2px 0 0;
+  max-width: 72ch;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Compact single-line rows: controller, frame, error, lifecycle. */
+.tr-note {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.tr-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.tr-type {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.tr-title {
+  min-width: 0;
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.tr-row-error .tr-title,
+.tr-row-error .tr-type {
+  color: var(--bad);
+}
+
+.tr-row-frame .tr-title {
+  color: var(--ink);
+}
+
+.tr-row-demoted .tr-title,
+.tr-row-demoted .tr-type {
+  color: var(--muted);
+}
+
+/* Tool call block. */
+.tr-tool {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+
+.tr-tool-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tr-tool-name {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.tr-tool-status {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tr-tone-ok {
+  color: var(--signal);
+}
+
+.tr-tone-warn {
+  color: var(--warn);
+}
+
+.tr-tone-bad {
+  color: var(--bad);
+}
+
+.tr-tool-time,
+.tr-tool-title {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tr-command {
+  display: grid;
+  grid-template-columns: 1.5ch minmax(0, 1fr);
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tr-command-mark {
+  color: var(--signal-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tr-command pre {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  tab-size: 2;
+}
+
+.tr-kv {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  display: grid;
+  grid-template-columns: fit-content(14ch) minmax(0, 1fr);
+  gap: var(--s1) var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tr-kv-row {
+  display: contents;
+}
+
+.tr-kv dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.tr-kv dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.tr-kv-inline {
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.tr-kv-clamp {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  width: 100%;
+  text-align: left;
+  border-color: var(--line-soft);
+}
+
+.tr-kv-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+.tr-kv-expand {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tr-kv-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  align-items: flex-start;
+}
+
+.tr-stream {
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--line-soft);
+}
+
+.tr-stream .label {
+  display: block;
+  margin-bottom: var(--s1);
+}
+
+.tr-stream-bad pre,
+.tr-stream-bad code {
+  color: var(--bad);
+}
+
+.tr-tool-error {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--line-soft);
+  color: var(--bad);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Result rows are headed so they never read as call inputs. */
+.tr-tool > .label {
+  display: block;
+  padding: var(--s2) var(--s3) 0;
+}
+
+.tr-tool-note {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--line-soft);
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+/* Deep dive: the record surface is already dense, so trim the padding. The
+   deep-dive row is a plain block, so the tool card carries its own gap. */
+.tr-tool.is-compact {
+  margin-bottom: var(--s2);
+}
+
+.tr-tool.is-compact .tr-tool-head,
+.tr-tool.is-compact .tr-command,
+.tr-tool.is-compact .tr-kv,
+.tr-tool.is-compact .tr-stream,
+.tr-tool.is-compact .tr-tool-error,
+.tr-tool.is-compact .tr-tool-note {
+  padding: var(--s1) var(--s2);
+}
+
+.tr-tool.is-compact > .label {
+  padding: var(--s1) var(--s2) 0;
+}
+
+.tr-more {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: transparent;
+  padding: 1px var(--s2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.tr-more:hover {
+  color: var(--ink-dim);
+  border-color: var(--line);
+}
+
+/* Sticky arrival control: only appears while the operator is scrolled up. */
+.tr-jumpwrap {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  height: 0;
+}
+
+.tr-jump {
+  transform: translateY(-32px);
+  border: 1px solid var(--signal-dim);
+  border-radius: var(--r);
+  background: var(--surface);
+  padding: var(--s1) var(--s3);
+  color: var(--signal);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.transcript button:focus-visible,
+.transcript select:focus-visible,
+.tr-scroll button:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tr-row {
+    animation: tr-arrive 140ms ease-out;
+  }
+
+  @keyframes tr-arrive {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@media (max-width: 720px) {
+  .tr-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s1);
+  }
+
+  .tr-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s1);
+  }
+
+  .transcript .tr-meta {
+    gap: var(--s2);
+  }
+}
