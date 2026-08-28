@@ -3,3 +3,6 @@
 data
 config.yaml
 *.local.yaml
+!cmd/
+!cmd/pixel-steward/
+!cmd/pixel-steward/**
