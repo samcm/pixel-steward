@@ -20,6 +20,16 @@ type blockingRunner struct {
 	done    chan struct{}
 }
 
+type recordingExecutor struct {
+	executor.Disabled
+	suspends int
+}
+
+func (e *recordingExecutor) Suspend(context.Context, string) error {
+	e.suspends++
+	return nil
+}
+
 func (r *blockingRunner) Run(ctx context.Context, _ agent.Wake) error {
 	r.mu.Lock()
 	r.started++
@@ -77,6 +87,8 @@ func TestNoLeaseOrInferenceStartsDuringBlackout(t *testing.T) {
 	runner := &blockingRunner{done: make(chan struct{})}
 	panel := display.NewFake()
 	service := testService(t, &now, runner, panel)
+	sandbox := &recordingExecutor{}
+	service.executor = sandbox
 	if err := service.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +103,15 @@ func TestNoLeaseOrInferenceStartsDuringBlackout(t *testing.T) {
 	defer runner.mu.Unlock()
 	if runner.started != 0 {
 		t.Fatalf("runner started %d times", runner.started)
+	}
+	if sandbox.suspends != 1 {
+		t.Fatalf("sandbox suspended %d times, want once", sandbox.suspends)
+	}
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sandbox.suspends != 1 {
+		t.Fatalf("sandbox suspended %d times after repeated tick, want once", sandbox.suspends)
 	}
 }
 

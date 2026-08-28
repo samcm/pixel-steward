@@ -54,7 +54,7 @@ type Service struct {
 	ledgers      map[string]*budget.Ledger
 	tokens       map[string]string
 	running      map[string]context.CancelFunc
-	sandboxState map[string]string
+	sandboxState string
 	screenState  *bool
 }
 
@@ -97,7 +97,7 @@ func New(cfg config.Config, database store.Store, objects objectstore.Store, pan
 	service := &Service{
 		config: cfg, store: database, objects: objects, display: panel, runner: runner, executor: sandbox, clock: clock, window: window,
 		selectr: scheduler.Selector{AvoidImmediateRepeat: cfg.Scheduler.AvoidImmediateRepeat},
-		ledgers: make(map[string]*budget.Ledger), tokens: make(map[string]string), running: make(map[string]context.CancelFunc), sandboxState: make(map[string]string),
+		ledgers: make(map[string]*budget.Ledger), tokens: make(map[string]string), running: make(map[string]context.CancelFunc),
 	}
 	if err := service.syncPersonas(context.Background()); err != nil {
 		return nil, err
@@ -141,17 +141,18 @@ func (s *Service) Tick(ctx context.Context) error {
 		}
 		_ = s.executor.Destroy(ctx, lease.ID)
 		s.mu.Lock()
-		delete(s.sandboxState, lease.ID)
+		s.sandboxState = ""
 		s.mu.Unlock()
 		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "lease.ended", Payload: jsonValue(map[string]string{"reason": "deadline"})})
 		lease = nil
 	}
 	if blackout {
+		sandboxID := "controller"
 		if lease != nil {
 			s.stop(lease.ID)
-			_ = s.setSandbox(ctx, lease.ID, false)
+			sandboxID = lease.ID
 		}
-		return nil
+		return s.setSandbox(ctx, sandboxID, false)
 	}
 	if lease == nil {
 		lease, err = s.createLease(ctx, now)
@@ -706,7 +707,7 @@ func (s *Service) setSandbox(ctx context.Context, leaseID string, running bool) 
 		want = "running"
 	}
 	s.mu.Lock()
-	if s.sandboxState[leaseID] == want {
+	if s.sandboxState == want {
 		s.mu.Unlock()
 		return nil
 	}
@@ -721,7 +722,7 @@ func (s *Service) setSandbox(ctx context.Context, leaseID string, running bool) 
 		return err
 	}
 	s.mu.Lock()
-	s.sandboxState[leaseID] = want
+	s.sandboxState = want
 	s.mu.Unlock()
 	return nil
 }
