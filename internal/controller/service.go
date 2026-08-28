@@ -87,6 +87,7 @@ type PersonaDetail struct {
 	Configuration map[string]any            `json:"configuration"`
 	Leases        []domain.Lease            `json:"leases"`
 	Events        []domain.Event            `json:"events"`
+	Prompts       []domain.Event            `json:"prompts"`
 	Transcript    []domain.Event            `json:"transcript"`
 	Frames        []domain.Frame            `json:"frames"`
 	Inference     []domain.InferenceRequest `json:"inference"`
@@ -514,10 +515,13 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 	detail := PersonaDetail{Persona: persona,
 		Leases: filterLeases(leases, id), Events: filterEvents(events, id),
 		Frames: filterFrames(frames, id), Inference: filterInference(inference, id),
-		Schedules: filterSchedules(schedules, id), Transcript: make([]domain.Event, 0),
+		Schedules: filterSchedules(schedules, id), Prompts: make([]domain.Event, 0), Transcript: make([]domain.Event, 0),
 		Truncated: len(leases) == 1000 || len(events) == 1000 || len(frames) == 1000 || len(inference) == 1000,
 	}
 	for _, event := range detail.Events {
+		if event.Type == "agent.prompt" {
+			detail.Prompts = append(detail.Prompts, event)
+		}
 		if strings.HasPrefix(event.Type, "runtime.") {
 			detail.Transcript = append(detail.Transcript, event)
 		}
@@ -748,6 +752,9 @@ func (s *Service) startWake(parent context.Context, lease domain.Lease, reason s
 		leasePrompt += "\n\nScheduled wake context:\n" + string(payload)
 	}
 	profile := s.config.ModelProfiles[lease.ModelProfile]
+	s.event(parent, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "agent.prompt", Payload: jsonValue(map[string]string{
+		"reason": reason, "prompt": leasePrompt,
+	})})
 	s.event(parent, domain.Event{At: s.clock(), LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "agent.wake.started", Payload: jsonValue(map[string]string{"reason": reason})})
 	go func() {
 		err := s.runner.Run(ctx, agent.Wake{Lease: lease, Persona: persona, Profile: profile, Prompt: leasePrompt, AgentToken: token, Budget: ledger})

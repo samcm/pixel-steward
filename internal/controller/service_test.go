@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,20 @@ func TestExpiringTestWindowTemporarilyOverridesBlackout(t *testing.T) {
 	}
 	if status.Lease == nil || !status.Display.ScreenOn {
 		t.Fatalf("test window did not activate lease and display: %+v", status)
+	}
+	events, err := service.store.ListEvents(context.Background(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptRecorded := false
+	for _, event := range events {
+		if event.Type == "agent.prompt" && strings.Contains(string(event.Payload), "You have temporary creative ownership") {
+			promptRecorded = true
+			break
+		}
+	}
+	if !promptRecorded {
+		t.Fatal("exact wake prompt was not recorded")
 	}
 
 	now = now.Add(31 * time.Minute)
