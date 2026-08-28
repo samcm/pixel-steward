@@ -6,7 +6,6 @@
 /dist/
 *.out
 *.test
-config.yaml
 data/
 .env
 *.local.yaml
