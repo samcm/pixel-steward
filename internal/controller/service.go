@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,15 +41,16 @@ var (
 type Clock func() time.Time
 
 type Service struct {
-	config   config.Config
-	store    store.Store
-	objects  objectstore.Store
-	display  display.Display
-	runner   agent.Runner
-	executor executor.Executor
-	clock    Clock
-	window   policy.DailyWindow
-	selectr  scheduler.Selector
+	config          config.Config
+	store           store.Store
+	objects         objectstore.Store
+	display         display.Display
+	runner          agent.Runner
+	executor        executor.Executor
+	clock           Clock
+	window          policy.DailyWindow
+	testWindowUntil time.Time
+	selectr         scheduler.Selector
 
 	mu           sync.Mutex
 	ledgers      map[string]*budget.Ledger
@@ -59,14 +61,16 @@ type Service struct {
 }
 
 type Status struct {
-	AsOf           time.Time        `json:"as_of"`
-	Blackout       bool             `json:"blackout"`
-	NextTransition time.Time        `json:"next_transition"`
-	Lease          *domain.Lease    `json:"lease,omitempty"`
-	Budget         *budget.Snapshot `json:"budget,omitempty"`
-	Display        display.Status   `json:"display"`
-	AgentRunning   bool             `json:"agent_running"`
-	Reasoning      *ReasoningStatus `json:"reasoning,omitempty"`
+	AsOf              time.Time        `json:"as_of"`
+	Blackout          bool             `json:"blackout"`
+	ScheduledBlackout bool             `json:"scheduled_blackout"`
+	TestWindowUntil   *time.Time       `json:"test_window_until,omitempty"`
+	NextTransition    time.Time        `json:"next_transition"`
+	Lease             *domain.Lease    `json:"lease,omitempty"`
+	Budget            *budget.Snapshot `json:"budget,omitempty"`
+	Display           display.Status   `json:"display"`
+	AgentRunning      bool             `json:"agent_running"`
+	Reasoning         *ReasoningStatus `json:"reasoning,omitempty"`
 }
 
 type ReasoningStatus struct {
@@ -74,6 +78,20 @@ type ReasoningStatus struct {
 	Source      string   `json:"source"`
 	Allowed     []string `json:"allowed"`
 	CacheImpact string   `json:"cache_impact"`
+}
+
+// PersonaDetail is the operator-facing, secret-safe view of one persona. The
+// configuration contains credential environment variable names, never values.
+type PersonaDetail struct {
+	Persona       domain.Persona            `json:"persona"`
+	Configuration map[string]any            `json:"configuration"`
+	Leases        []domain.Lease            `json:"leases"`
+	Events        []domain.Event            `json:"events"`
+	Transcript    []domain.Event            `json:"transcript"`
+	Frames        []domain.Frame            `json:"frames"`
+	Inference     []domain.InferenceRequest `json:"inference"`
+	Schedules     []domain.Schedule         `json:"schedules"`
+	Truncated     bool                      `json:"truncated"`
 }
 
 func New(cfg config.Config, database store.Store, objects objectstore.Store, panel display.Display, runner agent.Runner, sandbox executor.Executor, clock Clock) (*Service, error) {
@@ -88,6 +106,13 @@ func New(cfg config.Config, database store.Store, objects objectstore.Store, pan
 	if err != nil {
 		return nil, err
 	}
+	var testWindowUntil time.Time
+	if cfg.Operator.TestWindowUntil != "" {
+		testWindowUntil, err = time.Parse(time.RFC3339, cfg.Operator.TestWindowUntil)
+		if err != nil {
+			return nil, fmt.Errorf("parse operator test window: %w", err)
+		}
+	}
 	if runner == nil {
 		runner = agent.Disabled{}
 	}
@@ -96,8 +121,9 @@ func New(cfg config.Config, database store.Store, objects objectstore.Store, pan
 	}
 	service := &Service{
 		config: cfg, store: database, objects: objects, display: panel, runner: runner, executor: sandbox, clock: clock, window: window,
-		selectr: scheduler.Selector{AvoidImmediateRepeat: cfg.Scheduler.AvoidImmediateRepeat},
-		ledgers: make(map[string]*budget.Ledger), tokens: make(map[string]string), running: make(map[string]context.CancelFunc),
+		testWindowUntil: testWindowUntil,
+		selectr:         scheduler.Selector{AvoidImmediateRepeat: cfg.Scheduler.AvoidImmediateRepeat},
+		ledgers:         make(map[string]*budget.Ledger), tokens: make(map[string]string), running: make(map[string]context.CancelFunc),
 	}
 	if err := service.syncPersonas(context.Background()); err != nil {
 		return nil, err
@@ -126,7 +152,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 func (s *Service) Tick(ctx context.Context) error {
 	now := s.clock()
-	blackout := s.window.Contains(now)
+	blackout := s.inBlackout(now)
 	if err := s.enforceScreen(ctx, !blackout); err != nil {
 		return err
 	}
@@ -202,7 +228,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	if schedule.Kind == "renderer" {
 		return s.runRenderer(ctx, *lease, schedule, now)
 	}
-	if schedule.MissedPolicy == "skip" && schedule.NextRunAt != nil && (s.window.Contains(*schedule.NextRunAt) || now.Sub(*schedule.NextRunAt) > 30*time.Second) {
+	if schedule.MissedPolicy == "skip" && schedule.NextRunAt != nil && (s.inBlackout(*schedule.NextRunAt) || now.Sub(*schedule.NextRunAt) > 30*time.Second) {
 		var next *time.Time
 		if schedule.Interval > 0 {
 			value := *schedule.NextRunAt
@@ -234,7 +260,12 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 	panel, panelErr := s.display.Status(ctx)
-	status := Status{AsOf: now, Blackout: s.window.Contains(now), NextTransition: s.window.NextTransition(now), Lease: lease, Display: panel}
+	status := Status{AsOf: now, Blackout: s.inBlackout(now), ScheduledBlackout: s.window.Contains(now),
+		NextTransition: s.nextTransition(now), Lease: lease, Display: panel}
+	if s.testWindowActive(now) {
+		until := s.testWindowUntil
+		status.TestWindowUntil = &until
+	}
 	if lease != nil {
 		if err := s.ensureLeaseState(ctx, lease); err != nil {
 			return Status{}, err
@@ -262,7 +293,23 @@ func (s *Service) Budget(ctx context.Context, token string) (budget.Snapshot, do
 	return ledger.Snapshot(s.clock()), lease, nil
 }
 
-func (s *Service) Blackout() bool { return s.window.Contains(s.clock()) }
+func (s *Service) Blackout() bool { return s.inBlackout(s.clock()) }
+
+func (s *Service) testWindowActive(at time.Time) bool {
+	return !s.testWindowUntil.IsZero() && at.Before(s.testWindowUntil)
+}
+
+func (s *Service) inBlackout(at time.Time) bool {
+	return s.window.Contains(at) && !s.testWindowActive(at)
+}
+
+func (s *Service) nextTransition(at time.Time) time.Time {
+	next := s.window.NextTransition(at)
+	if s.window.Contains(at) && s.testWindowActive(at) && s.testWindowUntil.Before(next) {
+		return s.testWindowUntil
+	}
+	return next
+}
 
 func (s *Service) QueryHistory(ctx context.Context, token, query string) (domain.SQLResult, error) {
 	lease, err := s.authorize(ctx, token)
@@ -277,7 +324,7 @@ func (s *Service) Exec(ctx context.Context, token, command string, timeout time.
 	if err != nil {
 		return executor.Result{}, err
 	}
-	if s.window.Contains(s.clock()) {
+	if s.inBlackout(s.clock()) {
 		return executor.Result{}, ErrBlackout
 	}
 	result, err := s.executor.Exec(ctx, lease.ID, command, timeout)
@@ -292,7 +339,7 @@ func (s *Service) PublishPath(ctx context.Context, token, path string, modelDriv
 	if err != nil {
 		return domain.Frame{}, err
 	}
-	if s.window.Contains(s.clock()) {
+	if s.inBlackout(s.clock()) {
 		return domain.Frame{}, ErrBlackout
 	}
 	source, contentType, err := s.executor.ReadFile(ctx, lease.ID, path)
@@ -321,7 +368,7 @@ func (s *Service) Publish(ctx context.Context, token, contentType string, source
 		return domain.Frame{}, err
 	}
 	now := s.clock()
-	if s.window.Contains(now) {
+	if s.inBlackout(now) {
 		return domain.Frame{}, ErrBlackout
 	}
 	data, err := io.ReadAll(io.LimitReader(source, frame.MaxInput+1))
@@ -420,6 +467,143 @@ func (s *Service) SetPersonaEnabled(ctx context.Context, id string, enabled bool
 		}
 	}
 	return nil
+}
+
+func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, error) {
+	_, configured, err := s.persona(id)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+	personas, err := s.store.ListPersonas(ctx)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+	var persona domain.Persona
+	found := false
+	for _, candidate := range personas {
+		if candidate.ID == id {
+			persona, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return PersonaDetail{}, errors.New("persona not found")
+	}
+
+	leases, err := s.store.ListLeases(ctx, 1000)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+	events, err := s.store.ListEvents(ctx, 1000)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+	frames, err := s.store.ListFrames(ctx, "", 1000)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+	inference, err := s.store.ListInferenceRequests(ctx, "", 1000)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+	schedules, err := s.store.ListSchedules(ctx, "", nil)
+	if err != nil {
+		return PersonaDetail{}, err
+	}
+
+	detail := PersonaDetail{Persona: persona,
+		Leases: filterLeases(leases, id), Events: filterEvents(events, id),
+		Frames: filterFrames(frames, id), Inference: filterInference(inference, id),
+		Schedules: filterSchedules(schedules, id), Transcript: make([]domain.Event, 0),
+		Truncated: len(leases) == 1000 || len(events) == 1000 || len(frames) == 1000 || len(inference) == 1000,
+	}
+	for _, event := range detail.Events {
+		if strings.HasPrefix(event.Type, "runtime.") {
+			detail.Transcript = append(detail.Transcript, event)
+		}
+	}
+	soul, soulErr := os.ReadFile(filepath.Clean(configured.Soul))
+	if soulErr != nil {
+		soul = []byte(configured.DisplayName)
+	}
+	profile := s.config.ModelProfiles[configured.ModelProfile]
+	budgetLimit := s.config.Inference.LeaseBudget
+	if configured.BudgetOverride != nil {
+		budgetLimit = *configured.BudgetOverride
+	}
+	detail.Configuration = map[string]any{
+		"character_brief": string(soul),
+		"persona": map[string]any{
+			"id": configured.ID, "display_name": configured.DisplayName, "enabled_default": configured.Enabled,
+			"enabled_effective": persona.Enabled, "weight": configured.Weight, "cooldown": persona.Cooldown.String(),
+			"lease": persona.Lease.String(), "thinking": persona.Thinking, "toolsets": configured.Toolsets,
+		},
+		"model_profile": map[string]any{
+			"name": configured.ModelProfile, "provider": profile.Provider, "model": profile.Model, "endpoint": profile.Endpoint,
+			"credential_env": profile.CredentialEnv, "thinking_default": profile.Thinking.Default,
+			"thinking_allowed": profile.Thinking.Allowed, "thinking_capabilities": profile.Thinking.Capabilities,
+			"cache_impact": profile.Thinking.CacheImpact, "billing_mode": profile.Billing.Mode,
+			"rate_card": profile.Billing.RateCard, "private_rate_card": profile.Billing.PrivateRateCard,
+			"prefer_provider_reported_cost": profile.Billing.PreferProviderReportedCost,
+		},
+		"budget": map[string]any{
+			"max_input_tokens": budgetLimit.MaxInputTokens, "max_output_tokens": budgetLimit.MaxOutputTokens,
+			"max_model_calls": budgetLimit.MaxModelCalls, "max_active_runtime": budgetLimit.MaxActiveRuntime.Duration().String(),
+			"max_cost_usd": budgetLimit.MaxCostUSD, "max_model_scene_commits": budgetLimit.MaxModelSceneCommits,
+			"per_call_max_output_tokens": s.config.Inference.PerCall.MaxOutputTokens,
+		},
+	}
+	return detail, nil
+}
+
+func filterLeases(values []domain.Lease, id string) []domain.Lease {
+	result := make([]domain.Lease, 0)
+	for _, value := range values {
+		if value.PersonaID == id {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func filterEvents(values []domain.Event, id string) []domain.Event {
+	result := make([]domain.Event, 0)
+	for _, value := range values {
+		if value.PersonaID == id {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func filterFrames(values []domain.Frame, id string) []domain.Frame {
+	result := make([]domain.Frame, 0)
+	for _, value := range values {
+		if value.PersonaID == id {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func filterInference(values []domain.InferenceRequest, id string) []domain.InferenceRequest {
+	result := make([]domain.InferenceRequest, 0)
+	for _, value := range values {
+		if value.PersonaID == id {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func filterSchedules(values []domain.Schedule, id string) []domain.Schedule {
+	result := make([]domain.Schedule, 0)
+	for _, value := range values {
+		if value.PersonaID == id {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func (s *Service) SetThinking(ctx context.Context, value string) error {

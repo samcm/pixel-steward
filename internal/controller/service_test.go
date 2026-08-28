@@ -115,6 +115,46 @@ func TestNoLeaseOrInferenceStartsDuringBlackout(t *testing.T) {
 	}
 }
 
+func TestExpiringTestWindowTemporarilyOverridesBlackout(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 22, 0, 0, 0, location)
+	runner := &blockingRunner{done: make(chan struct{})}
+	panel := display.NewFake()
+	service := testService(t, &now, runner, panel)
+	service.testWindowUntil = now.Add(30 * time.Minute)
+
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Blackout || !status.ScheduledBlackout || status.TestWindowUntil == nil {
+		t.Fatalf("unexpected test-window status: %+v", status)
+	}
+	if status.Lease == nil || !status.Display.ScreenOn {
+		t.Fatalf("test window did not activate lease and display: %+v", status)
+	}
+
+	now = now.Add(31 * time.Minute)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runner.done:
+	case <-time.After(time.Second):
+		t.Fatal("wake was not cancelled when test window expired")
+	}
+	status, err = service.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Blackout || status.TestWindowUntil != nil || status.Display.ScreenOn {
+		t.Fatalf("blackout was not restored after test window: %+v", status)
+	}
+}
+
 func testService(t *testing.T, now *time.Time, runner agent.Runner, panel display.Display) *Service {
 	t.Helper()
 	cost := 10.0

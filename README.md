@@ -26,13 +26,16 @@ example values, and deployment primitives.
 - a disposable-executor contract for arbitrary commands and Docker workloads;
 - one-shot scene publishing and budget-free sampling of locally rendered files;
 - immutable source/final-frame archival to a filesystem or S3-compatible store;
-- an operator dashboard with the live canvas, persona overrides, leases,
-  budgets, display health, and full event history.
+- an operator dashboard with the live canvas, stable in-place refreshes,
+  persona configuration/transcript deep dives, leases, budgets, display
+  health, and full event history.
 
 ## Design invariants
 
 - Exactly one controller owns display publication.
 - Blackout and lease expiry are enforced outside the agent runtime.
+- A configured test window is an absolute RFC3339 deadline: it can temporarily
+  override blackout, then fails closed without an operator cleanup action.
 - Model calls have hard token, call, time, scene-commit, and optional cost caps.
 - Agents can inspect current accounting but cannot increase budgets or change
   reasoning effort.

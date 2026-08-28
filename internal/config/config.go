@@ -21,12 +21,20 @@ type Config struct {
 	Database      Database                `yaml:"database"`
 	Storage       Storage                 `yaml:"storage"`
 	Display       Display                 `yaml:"display"`
+	Operator      Operator                `yaml:"operator"`
 	Scheduler     Scheduler               `yaml:"scheduler"`
 	Inference     Inference               `yaml:"inference"`
 	Runtime       Runtime                 `yaml:"runtime"`
 	Sandbox       Sandbox                 `yaml:"sandbox"`
 	ModelProfiles map[string]ModelProfile `yaml:"model_profiles"`
 	Personas      []Persona               `yaml:"personas"`
+}
+
+// Operator contains temporary, explicitly configured control-plane overrides.
+// TestWindowUntil is an absolute RFC3339 deadline so an override cannot be
+// accidentally left enabled indefinitely.
+type Operator struct {
+	TestWindowUntil string `yaml:"test_window_until"`
 }
 
 type HTTP struct {
@@ -266,6 +274,11 @@ func (c Config) Validate() error {
 	}
 	if err := validateTimeSpan("display.blackout", c.Display.Blackout); err != nil {
 		problems = append(problems, err)
+	}
+	if c.Operator.TestWindowUntil != "" {
+		if _, err := time.Parse(time.RFC3339, c.Operator.TestWindowUntil); err != nil {
+			problems = append(problems, fmt.Errorf("operator.test_window_until must be an RFC3339 timestamp: %w", err))
+		}
 	}
 	if err := validateTimeSpan("inference.allowed_window", c.Inference.AllowedWindow); err != nil {
 		problems = append(problems, err)

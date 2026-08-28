@@ -52,6 +52,7 @@ func (s *Server) routes() {
 	})
 	s.mux.Handle("GET /api/v1/status", s.operator(http.HandlerFunc(s.status)))
 	s.mux.Handle("GET /api/v1/personas", s.operator(http.HandlerFunc(s.personas)))
+	s.mux.Handle("GET /api/v1/personas/{id}", s.operator(http.HandlerFunc(s.persona)))
 	s.mux.Handle("PUT /api/v1/personas/{id}/enabled", s.operator(http.HandlerFunc(s.personaEnabled)))
 	s.mux.Handle("POST /api/v1/lease/revoke", s.operator(http.HandlerFunc(s.revoke)))
 	s.mux.Handle("PUT /api/v1/lease/reasoning", s.operator(http.HandlerFunc(s.reasoning)))
@@ -77,6 +78,11 @@ func (s *Server) status(response http.ResponseWriter, request *http.Request) {
 
 func (s *Server) personas(response http.ResponseWriter, request *http.Request) {
 	value, err := s.service.Store().ListPersonas(request.Context())
+	writeJSON(response, value, err)
+}
+
+func (s *Server) persona(response http.ResponseWriter, request *http.Request) {
+	value, err := s.service.PersonaDetail(request.Context(), request.PathValue("id"))
 	writeJSON(response, value, err)
 }
 

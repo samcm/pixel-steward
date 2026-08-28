@@ -20,6 +20,11 @@ display:
     start: "21:00"
     end: "09:00"
 
+# Optional emergency/test override. It must be an absolute RFC3339 deadline and
+# has no effect after it expires.
+# operator:
+#   test_window_until: "2030-01-01T22:30:00+10:00"
+
 scheduler:
   default_lease: 24h
   selection: weighted_random
