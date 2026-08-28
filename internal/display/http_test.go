@@ -62,3 +62,21 @@ func TestHTTPAdapterContract(t *testing.T) {
 		t.Fatalf("status=%+v published=%d screen=%d", status, published, screenCommands)
 	}
 }
+
+func TestHTTPStatusUnderstandsScreenOff(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write([]byte(`{"device":{"online":true},"screen_off":true}`))
+	}))
+	defer server.Close()
+	client, err := NewHTTP(server.URL, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := client.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ScreenOn {
+		t.Fatal("screen_off was reported as on")
+	}
+}

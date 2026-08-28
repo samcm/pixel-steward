@@ -135,15 +135,22 @@ func (h *HTTP) Status(ctx context.Context) (Status, error) {
 			Skipped   uint64    `json:"skipped"`
 			LastOK    time.Time `json:"last_ok"`
 		} `json:"device"`
-		ScreenOn bool `json:"screen_on"`
+		ScreenOn  *bool `json:"screen_on"`
+		ScreenOff *bool `json:"screen_off"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&raw); err != nil {
 		return Status{}, err
 	}
 
+	screenOn := true
+	if raw.ScreenOn != nil {
+		screenOn = *raw.ScreenOn
+	} else if raw.ScreenOff != nil {
+		screenOn = !*raw.ScreenOff
+	}
 	return Status{
 		Online:      raw.Device.Online,
-		ScreenOn:    raw.ScreenOn,
+		ScreenOn:    screenOn,
 		LastFrameAt: raw.Device.LastOK,
 		LastError:   raw.Device.LastError,
 		Frames:      raw.Device.Frames,
