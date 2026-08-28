@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type Config struct {
 	Version       int                     `yaml:"version"`
@@ -85,6 +84,7 @@ type Scheduler struct {
 type Inference struct {
 	AllowedWindow        TimeSpan  `yaml:"allowed_window"`
 	BlackoutBehavior     string    `yaml:"blackout_behavior"`
+	ModelProfile         string    `yaml:"model_profile"`
 	DefaultThinking      string    `yaml:"default_thinking"`
 	ThinkingChangePolicy string    `yaml:"thinking_change_policy"`
 	LeaseBudget          Budget    `yaml:"lease_budget"`
@@ -156,8 +156,6 @@ type Persona struct {
 	Weight         int      `yaml:"weight"`
 	Cooldown       Duration `yaml:"cooldown"`
 	Lease          Duration `yaml:"lease"`
-	ModelProfile   string   `yaml:"model_profile"`
-	Thinking       string   `yaml:"thinking"`
 	Soul           string   `yaml:"soul"`
 	Toolsets       []string `yaml:"toolsets"`
 	BudgetOverride *Budget  `yaml:"budget"`
@@ -289,6 +287,13 @@ func (c Config) Validate() error {
 	if c.Inference.BlackoutBehavior != "suspend" && c.Inference.BlackoutBehavior != "terminate" {
 		problems = append(problems, errors.New("inference.blackout_behavior must be suspend or terminate"))
 	}
+	profile, hasInferenceProfile := c.ModelProfiles[c.Inference.ModelProfile]
+	if c.Runtime.Driver == "opencode" && !hasInferenceProfile {
+		problems = append(problems, fmt.Errorf("inference.model_profile %q does not exist", c.Inference.ModelProfile))
+	}
+	if hasInferenceProfile && len(profile.Thinking.Allowed) > 0 && !contains(profile.Thinking.Allowed, c.Inference.DefaultThinking) {
+		problems = append(problems, fmt.Errorf("inference.default_thinking %q is not supported by model profile %q", c.Inference.DefaultThinking, c.Inference.ModelProfile))
+	}
 	if err := validateBudget("inference.lease_budget", c.Inference.LeaseBudget); err != nil {
 		problems = append(problems, err)
 	}
@@ -350,18 +355,6 @@ func (c Config) Validate() error {
 		if persona.Weight < 0 {
 			problems = append(problems, fmt.Errorf("%s.weight cannot be negative", prefix))
 		}
-		profile, ok := c.ModelProfiles[persona.ModelProfile]
-		if !ok {
-			problems = append(problems, fmt.Errorf("%s.model_profile %q does not exist", prefix, persona.ModelProfile))
-			continue
-		}
-		thinking := persona.Thinking
-		if thinking == "" {
-			thinking = profile.Thinking.Default
-		}
-		if len(profile.Thinking.Allowed) > 0 && !slices.Contains(profile.Thinking.Allowed, thinking) {
-			problems = append(problems, fmt.Errorf("%s.thinking %q is not supported by model profile %q", prefix, thinking, persona.ModelProfile))
-		}
 		if persona.BudgetOverride != nil {
 			if err := validateBudget(prefix+".budget", *persona.BudgetOverride); err != nil {
 				problems = append(problems, err)
@@ -379,6 +372,15 @@ func (c Config) Validate() error {
 	}
 
 	return errors.Join(problems...)
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func validateBudget(path string, budget Budget) error {

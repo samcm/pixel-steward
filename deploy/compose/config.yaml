@@ -1,4 +1,4 @@
-version: 1
+version: 2
 timezone: UTC
 
 http:
@@ -32,6 +32,7 @@ inference:
     start: "09:00"
     end: "21:00"
   blackout_behavior: suspend
+  model_profile: example-model
   default_thinking: low
   thinking_change_policy: operator_only
   lease_budget:
@@ -66,6 +67,4 @@ personas:
     enabled: true
     weight: 1
     cooldown: 24h
-    model_profile: example-model
-    thinking: low
     soul: /etc/pixel-steward/personas/example.md

@@ -18,6 +18,7 @@ example values, and deployment primitives.
 
 - weighted persona selection, cooldowns, 24-hour leases, and a strict
   timezone-aware blackout;
+- inference routing selected independently from persona identity and character;
 - hard per-lease call, token, active-runtime, scene-commit, and optional cost
   ledgers visible to the persona through `studio_budget`;
 - provider-native OpenCode token, reasoning-token, cache-token, and cost event
@@ -27,12 +28,15 @@ example values, and deployment primitives.
 - one-shot scene publishing and budget-free sampling of locally rendered files;
 - immutable source/final-frame archival to a filesystem or S3-compatible store;
 - an operator dashboard with the live canvas, stable in-place refreshes,
-  persona configuration/transcript deep dives, leases, budgets, display
-  health, and full event history.
+  persona configuration deep dives, every controller prompt verbatim, complete
+  runtime transcripts, leases, budgets, display health, and full event history.
 
 ## Design invariants
 
 - Exactly one controller owns display publication.
+- Persona configuration never selects a provider, endpoint, model, or reasoning
+  level; the controller binds its independently configured inference profile to
+  each lease and records that binding in history.
 - Blackout and lease expiry are enforced outside the agent runtime.
 - A configured test window is an absolute RFC3339 deadline: it can temporarily
   override blackout, then fails closed without an operator cleanup action.

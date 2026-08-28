@@ -137,6 +137,14 @@ func (p *Postgres) SyncPersonas(ctx context.Context, personas []domain.Persona) 
 		return err
 	}
 	defer tx.Rollback(ctx)
+	configuredIDs := make([]string, 0, len(personas))
+	for _, persona := range personas {
+		configuredIDs = append(configuredIDs, persona.ID)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE personas SET enabled_default=false, enabled_override=NULL, weight=0, updated_at=now()
+      WHERE NOT (id = ANY($1::text[]))`, configuredIDs); err != nil {
+		return err
+	}
 	for _, persona := range personas {
 		_, err = tx.Exec(ctx, `INSERT INTO personas
       (id, display_name, enabled_default, weight, cooldown_ns, lease_ns, model_profile, thinking, updated_at)
@@ -146,7 +154,7 @@ func (p *Postgres) SyncPersonas(ctx context.Context, personas []domain.Persona) 
       cooldown_ns=EXCLUDED.cooldown_ns, lease_ns=EXCLUDED.lease_ns,
       model_profile=EXCLUDED.model_profile, thinking=EXCLUDED.thinking, updated_at=EXCLUDED.updated_at`,
 			persona.ID, persona.DisplayName, persona.Enabled, persona.Weight, int64(persona.Cooldown), int64(persona.Lease),
-			persona.ModelProfile, persona.Thinking, persona.UpdatedAt)
+			"", "", persona.UpdatedAt)
 		if err != nil {
 			return err
 		}
@@ -156,7 +164,7 @@ func (p *Postgres) SyncPersonas(ctx context.Context, personas []domain.Persona) 
 
 func (p *Postgres) ListPersonas(ctx context.Context) ([]domain.Persona, error) {
 	rows, err := p.pool.Query(ctx, `SELECT id, display_name, COALESCE(enabled_override, enabled_default), weight,
-    cooldown_ns, lease_ns, model_profile, thinking, updated_at FROM personas ORDER BY id`)
+    cooldown_ns, lease_ns, updated_at FROM personas ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +174,7 @@ func (p *Postgres) ListPersonas(ctx context.Context) ([]domain.Persona, error) {
 		var persona domain.Persona
 		var cooldown, lease int64
 		if err := rows.Scan(&persona.ID, &persona.DisplayName, &persona.Enabled, &persona.Weight, &cooldown, &lease,
-			&persona.ModelProfile, &persona.Thinking, &persona.UpdatedAt); err != nil {
+			&persona.UpdatedAt); err != nil {
 			return nil, err
 		}
 		persona.Cooldown, persona.Lease = time.Duration(cooldown), time.Duration(lease)

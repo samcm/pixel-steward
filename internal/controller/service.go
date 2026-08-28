@@ -278,7 +278,7 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		snapshot := ledger.Snapshot(now)
 		status.Budget = &snapshot
 		profile := s.config.ModelProfiles[lease.ModelProfile]
-		status.Reasoning = &ReasoningStatus{Effective: lease.Thinking, Source: "lease_config", Allowed: profile.Thinking.Allowed, CacheImpact: profile.Thinking.CacheImpact}
+		status.Reasoning = &ReasoningStatus{Effective: lease.Thinking, Source: "controller_config", Allowed: profile.Thinking.Allowed, CacheImpact: profile.Thinking.CacheImpact}
 	}
 	return status, panelErr
 }
@@ -530,7 +530,6 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 	if soulErr != nil {
 		soul = []byte(configured.DisplayName)
 	}
-	profile := s.config.ModelProfiles[configured.ModelProfile]
 	budgetLimit := s.config.Inference.LeaseBudget
 	if configured.BudgetOverride != nil {
 		budgetLimit = *configured.BudgetOverride
@@ -540,15 +539,7 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 		"persona": map[string]any{
 			"id": configured.ID, "display_name": configured.DisplayName, "enabled_default": configured.Enabled,
 			"enabled_effective": persona.Enabled, "weight": configured.Weight, "cooldown": persona.Cooldown.String(),
-			"lease": persona.Lease.String(), "thinking": persona.Thinking, "toolsets": configured.Toolsets,
-		},
-		"model_profile": map[string]any{
-			"name": configured.ModelProfile, "provider": profile.Provider, "model": profile.Model, "endpoint": profile.Endpoint,
-			"credential_env": profile.CredentialEnv, "thinking_default": profile.Thinking.Default,
-			"thinking_allowed": profile.Thinking.Allowed, "thinking_capabilities": profile.Thinking.Capabilities,
-			"cache_impact": profile.Thinking.CacheImpact, "billing_mode": profile.Billing.Mode,
-			"rate_card": profile.Billing.RateCard, "private_rate_card": profile.Billing.PrivateRateCard,
-			"prefer_provider_reported_cost": profile.Billing.PreferProviderReportedCost,
+			"lease": persona.Lease.String(), "toolsets": configured.Toolsets,
 		},
 		"budget": map[string]any{
 			"max_input_tokens": budgetLimit.MaxInputTokens, "max_output_tokens": budgetLimit.MaxOutputTokens,
@@ -684,8 +675,8 @@ func (s *Service) createLease(ctx context.Context, now time.Time) (*domain.Lease
 	if duration <= 0 {
 		duration = s.config.Scheduler.DefaultLease.Duration()
 	}
-	lease := domain.Lease{ID: newID("lease"), PersonaID: persona.ID, ModelProfile: persona.ModelProfile,
-		Thinking: persona.Thinking, StartedAt: now, EndsAt: now.Add(duration), Status: "active"}
+	lease := domain.Lease{ID: newID("lease"), PersonaID: persona.ID, ModelProfile: s.config.Inference.ModelProfile,
+		Thinking: s.config.Inference.DefaultThinking, StartedAt: now, EndsAt: now.Add(duration), Status: "active"}
 	token, hash, err := newToken()
 	if err != nil {
 		return nil, err
@@ -843,10 +834,6 @@ func (s *Service) authorize(ctx context.Context, token string) (domain.Lease, er
 func (s *Service) persona(id string) (domain.Persona, config.Persona, error) {
 	for _, value := range s.config.Personas {
 		if value.ID == id {
-			thinking := value.Thinking
-			if thinking == "" {
-				thinking = s.config.ModelProfiles[value.ModelProfile].Thinking.Default
-			}
 			lease := value.Lease.Duration()
 			if lease <= 0 {
 				lease = s.config.Scheduler.DefaultLease.Duration()
@@ -856,7 +843,7 @@ func (s *Service) persona(id string) (domain.Persona, config.Persona, error) {
 				cooldown = s.config.Scheduler.DefaultCooldown.Duration()
 			}
 			return domain.Persona{ID: value.ID, DisplayName: value.DisplayName, Enabled: value.Enabled, Weight: value.Weight,
-				Cooldown: cooldown, Lease: lease, ModelProfile: value.ModelProfile, Thinking: thinking, UpdatedAt: s.clock()}, value, nil
+				Cooldown: cooldown, Lease: lease, UpdatedAt: s.clock()}, value, nil
 		}
 	}
 	return domain.Persona{}, config.Persona{}, errors.New("persona not found in configuration")

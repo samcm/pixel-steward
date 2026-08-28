@@ -58,23 +58,6 @@ func (o *OpenCode) Run(parent context.Context, wake agent.Wake) error {
 	}
 	perCallOutput = min(perCallOutput, snapshot.OutputTokens.Remaining/int64(steps), snapshot.PerCallOutputLimit)
 
-	reservations := make([]budget.Reservation, 0, steps)
-	for range steps {
-		reservation, err := wake.Budget.Reserve(now, budget.Estimate{InputTokens: promptEstimate, MaxOutputTokens: perCallOutput})
-		if err != nil {
-			for _, existing := range reservations {
-				_ = wake.Budget.Cancel(existing.ID)
-			}
-			return err
-		}
-		reservations = append(reservations, reservation)
-	}
-	defer func() {
-		for _, reservation := range reservations {
-			_ = wake.Budget.Cancel(reservation.ID)
-		}
-	}()
-
 	workspace := filepath.Join(o.config.WorkspaceRoot, wake.Lease.ID)
 	supervisor := filepath.Join(workspace, ".pixel-steward")
 	configHome := filepath.Join(supervisor, "config")
@@ -136,7 +119,13 @@ func (o *OpenCode) Run(parent context.Context, wake agent.Wake) error {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	stepIndex := 0
-	stepStarted := now
+	var activeReservation *budget.Reservation
+	var reservationErr error
+	defer func() {
+		if activeReservation != nil {
+			_ = wake.Budget.Cancel(activeReservation.ID)
+		}
+	}()
 	for scanner.Scan() {
 		raw := append([]byte(nil), scanner.Bytes()...)
 		var event openCodeEvent
@@ -145,7 +134,20 @@ func (o *OpenCode) Run(parent context.Context, wake agent.Wake) error {
 			continue
 		}
 		o.appendEvent(wake, "runtime."+event.Type, raw)
-		if event.Type != "step_finish" || stepIndex >= len(reservations) {
+		if event.Type == "step_start" {
+			if activeReservation != nil {
+				continue
+			}
+			reservation, reserveErr := wake.Budget.Reserve(o.clock(), budget.Estimate{InputTokens: promptEstimate, MaxOutputTokens: perCallOutput})
+			if reserveErr != nil {
+				reservationErr = reserveErr
+				cancel()
+				break
+			}
+			activeReservation = &reservation
+			continue
+		}
+		if event.Type != "step_finish" || activeReservation == nil {
 			continue
 		}
 		ended := o.clock()
@@ -154,21 +156,21 @@ func (o *OpenCode) Run(parent context.Context, wake agent.Wake) error {
 		request := domain.InferenceRequest{
 			ID: newRequestID(wake.Lease.ID, stepIndex), LeaseID: wake.Lease.ID, PersonaID: wake.Persona.ID,
 			Provider: wake.Profile.Provider, Model: wake.Profile.Model, Thinking: wake.Lease.Thinking,
-			ThinkingSource: "lease_config", ProviderRequestID: event.Part.MessageID, StartedAt: reservations[stepIndex].StartedAt,
+			ThinkingSource: "controller_config", ProviderRequestID: event.Part.MessageID, StartedAt: activeReservation.StartedAt,
 			EndedAt: &ended, Status: "completed", StopReason: event.Part.Reason, PromptTokens: usage.Input,
 			CompletionTokens: usage.Output, ReasoningTokens: usage.Reasoning, CacheReadTokens: usage.Cache.Read,
 			CacheWriteTokens: usage.Cache.Write, EstimatedMeteredMicros: costMicros, ProviderReportedMicros: &costMicros,
 			RawUsage: raw,
 		}
 		_ = o.store.UpsertInferenceRequest(ctx, request)
-		_ = wake.Budget.Complete(reservations[stepIndex].ID, budget.Actual{
+		_ = wake.Budget.Complete(activeReservation.ID, budget.Actual{
 			Tokens: budget.TokenUsage{Input: usage.Input, Output: usage.Output, Reasoning: usage.Reasoning,
 				CacheRead: usage.Cache.Read, CacheWrite: usage.Cache.Write},
 			Cost:          budget.CostUsage{EstimatedMeteredMicros: costMicros, ProviderReportedMicros: &costMicros},
-			ActiveRuntime: ended.Sub(stepStarted),
+			ActiveRuntime: ended.Sub(activeReservation.StartedAt),
 		}, ended)
-		stepStarted = ended
-		reservations = append(reservations[:stepIndex], reservations[stepIndex+1:]...)
+		activeReservation = nil
+		stepIndex++
 		if wake.Budget.Snapshot(ended).Status == "exhausted" {
 			cancel()
 			break
@@ -177,6 +179,9 @@ func (o *OpenCode) Run(parent context.Context, wake agent.Wake) error {
 	scanErr := scanner.Err()
 	waitErr := command.Wait()
 	stderrOutput := <-stderrDone
+	if reservationErr != nil {
+		return reservationErr
+	}
 	if scanErr != nil {
 		return scanErr
 	}

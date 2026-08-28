@@ -9,7 +9,7 @@ import (
 func TestParseExample(t *testing.T) {
 	t.Setenv("TEST_ENDPOINT", "https://display.example.invalid")
 	raw := []byte(`
-version: 1
+version: 2
 timezone: UTC
 database: {driver: memory}
 storage: {driver: filesystem, directory: ./objects}
@@ -27,6 +27,8 @@ scheduler:
 inference:
   allowed_window: {start: "09:00", end: "21:00"}
   blackout_behavior: suspend
+  model_profile: test
+  default_thinking: low
   thinking_change_policy: operator_only
   lease_budget:
     max_input_tokens: 1000
@@ -46,8 +48,6 @@ personas:
     display_name: Fixture
     enabled: true
     weight: 1
-    model_profile: test
-    thinking: low
 runtime: {driver: disabled, workspace_root: ./workspaces}
 `)
 
@@ -68,7 +68,7 @@ runtime: {driver: disabled, workspace_root: ./workspaces}
 
 func TestParseRejectsInvalidTestWindowDeadline(t *testing.T) {
 	raw := []byte(`
-version: 1
+version: 2
 timezone: UTC
 display: {adapter: fake, max_fps: 1, blackout: {start: "21:00", end: "09:00"}}
 operator: {test_window_until: tomorrow}
@@ -86,7 +86,7 @@ inference:
 }
 
 func TestParseRejectsUnknownField(t *testing.T) {
-	raw := []byte("version: 1\ntimezone: UTC\nunexpected: true\n")
+	raw := []byte("version: 2\ntimezone: UTC\nunexpected: true\n")
 	_, err := Parse(raw)
 	if err == nil || !strings.Contains(err.Error(), "field unexpected not found") {
 		t.Fatalf("Parse() error = %v", err)
@@ -95,7 +95,7 @@ func TestParseRejectsUnknownField(t *testing.T) {
 
 func TestParseRejectsModelControlledThinking(t *testing.T) {
 	raw := []byte(`
-version: 1
+version: 2
 timezone: UTC
 display: {adapter: fake, max_fps: 1, blackout: {start: "21:00", end: "09:00"}}
 scheduler: {default_lease: 24h, selection: weighted_random, default_cooldown: 24h}

@@ -174,14 +174,14 @@ func testService(t *testing.T, now *time.Time, runner agent.Runner, panel displa
 	t.Helper()
 	cost := 10.0
 	cfg := config.Config{
-		Version: 1, Timezone: "Australia/Brisbane",
+		Version: 2, Timezone: "Australia/Brisbane",
 		Display:   config.Display{Adapter: "fake", MaxFPS: 1, Blackout: config.TimeSpan{Start: "21:00", End: "09:00"}},
 		Scheduler: config.Scheduler{DefaultLease: config.Duration(24 * time.Hour), DefaultCooldown: config.Duration(time.Hour), Selection: "weighted_random", AvoidImmediateRepeat: true},
-		Inference: config.Inference{LeaseBudget: config.Budget{MaxInputTokens: 100000, MaxOutputTokens: 10000,
+		Inference: config.Inference{ModelProfile: "model", DefaultThinking: "low", LeaseBudget: config.Budget{MaxInputTokens: 100000, MaxOutputTokens: 10000,
 			MaxModelCalls: 8, MaxActiveRuntime: config.Duration(time.Hour), MaxCostUSD: &cost, MaxModelSceneCommits: 20},
 			PerCall: config.CallLimit{MaxOutputTokens: 2048}},
 		ModelProfiles: map[string]config.ModelProfile{"model": {Provider: "test", Model: "test", Thinking: config.Thinking{Default: "low", Allowed: []string{"low"}}}},
-		Personas:      []config.Persona{{ID: "persona", DisplayName: "Persona", Enabled: true, Weight: 1, ModelProfile: "model", Thinking: "low"}},
+		Personas:      []config.Persona{{ID: "persona", DisplayName: "Persona", Enabled: true, Weight: 1}},
 	}
 	objects, err := objectstore.NewFilesystem(t.TempDir())
 	if err != nil {

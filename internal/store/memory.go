@@ -34,14 +34,16 @@ func (m *Memory) SyncPersonas(_ context.Context, personas []domain.Persona) erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	next := make(map[string]domain.Persona, len(personas))
 	for _, persona := range personas {
 		if previous, ok := m.personas[persona.ID]; ok {
 			// Runtime enable/disable state wins over a config refresh until the
 			// corresponding override is explicitly removed.
 			persona.Enabled = previous.Enabled
 		}
-		m.personas[persona.ID] = persona
+		next[persona.ID] = persona
 	}
+	m.personas = next
 
 	return nil
 }

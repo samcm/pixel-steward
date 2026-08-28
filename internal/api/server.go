@@ -167,7 +167,7 @@ func (s *Server) writeObject(response http.ResponseWriter, request *http.Request
 func (s *Server) agentBudget(response http.ResponseWriter, request *http.Request) {
 	snapshot, lease, err := s.service.Budget(request.Context(), bearer(request))
 	writeJSON(response, map[string]any{"lease_id": lease.ID, "lease_end": lease.EndsAt, "reasoning": map[string]string{
-		"effective": lease.Thinking, "source": "lease_config"}, "blackout": s.service.Blackout(), "enforcement": "controller", "accounting": snapshot}, err)
+		"effective": lease.Thinking, "source": "controller_config"}, "blackout": s.service.Blackout(), "enforcement": "controller", "accounting": snapshot}, err)
 }
 
 func (s *Server) agentSQL(response http.ResponseWriter, request *http.Request) {

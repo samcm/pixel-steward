@@ -6,15 +6,13 @@ import (
 )
 
 type Persona struct {
-	ID           string        `json:"id"`
-	DisplayName  string        `json:"display_name"`
-	Enabled      bool          `json:"enabled"`
-	Weight       int           `json:"weight"`
-	Cooldown     time.Duration `json:"cooldown"`
-	Lease        time.Duration `json:"lease"`
-	ModelProfile string        `json:"model_profile"`
-	Thinking     string        `json:"thinking"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	ID          string        `json:"id"`
+	DisplayName string        `json:"display_name"`
+	Enabled     bool          `json:"enabled"`
+	Weight      int           `json:"weight"`
+	Cooldown    time.Duration `json:"cooldown"`
+	Lease       time.Duration `json:"lease"`
+	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
 type Lease struct {
