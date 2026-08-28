@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -16,6 +17,8 @@ type S3 struct {
 	client *minio.Client
 	bucket string
 	region string
+	mu     sync.Mutex
+	ready  bool
 }
 
 type S3Config struct {
@@ -40,20 +43,36 @@ func NewS3(ctx context.Context, config S3Config) (*S3, error) {
 	if err != nil {
 		return nil, err
 	}
-	exists, err := client.BucketExists(ctx, config.Bucket)
+	return &S3{client: client, bucket: config.Bucket, region: config.Region}, nil
+}
+
+// ensureBucket keeps an unavailable object store from preventing the
+// controller and its operator API from starting. A failed check is deliberately
+// not cached: the next object operation retries after the service recovers.
+func (s *S3) ensureBucket(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ready {
+		return nil
+	}
+	exists, err := s.client.BucketExists(ctx, s.bucket)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !exists {
-		if err := client.MakeBucket(ctx, config.Bucket, minio.MakeBucketOptions{Region: config.Region}); err != nil {
-			return nil, fmt.Errorf("create object bucket: %w", err)
+		if err := s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{Region: s.region}); err != nil {
+			return fmt.Errorf("create object bucket: %w", err)
 		}
 	}
-	return &S3{client: client, bucket: config.Bucket, region: config.Region}, nil
+	s.ready = true
+	return nil
 }
 
 func (s *S3) Put(ctx context.Context, key, contentType string, source io.Reader) (Object, error) {
 	if err := validateObjectKey(key); err != nil {
+		return Object{}, err
+	}
+	if err := s.ensureBucket(ctx); err != nil {
 		return Object{}, err
 	}
 	info, err := s.client.PutObject(ctx, s.bucket, key, source, -1, minio.PutObjectOptions{ContentType: contentType})
@@ -65,6 +84,9 @@ func (s *S3) Put(ctx context.Context, key, contentType string, source io.Reader)
 
 func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, Object, error) {
 	if err := validateObjectKey(key); err != nil {
+		return nil, Object{}, err
+	}
+	if err := s.ensureBucket(ctx); err != nil {
 		return nil, Object{}, err
 	}
 	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
