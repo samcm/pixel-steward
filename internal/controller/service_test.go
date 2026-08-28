@@ -116,6 +116,39 @@ func TestNoLeaseOrInferenceStartsDuringBlackout(t *testing.T) {
 	}
 }
 
+func TestRemovedPersonaEndsActiveLease(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	service := testService(t, &now, agent.Disabled{}, display.NewFake())
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	original, err := service.store.ActiveLease(context.Background())
+	if err != nil || original == nil {
+		t.Fatalf("original active lease = %+v, error = %v", original, err)
+	}
+	service.config.Personas = []config.Persona{{ID: "replacement", DisplayName: "Replacement", Enabled: true, Weight: 1}}
+	if err := service.syncPersonas(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	active, err := service.store.ActiveLease(context.Background())
+	if err != nil || active == nil || active.PersonaID != "replacement" {
+		t.Fatalf("replacement active lease = %+v, error = %v", active, err)
+	}
+	leases, err := service.store.ListLeases(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lease := range leases {
+		if lease.ID == original.ID && lease.Status != "revoked" {
+			t.Fatalf("removed persona lease status = %q", lease.Status)
+		}
+	}
+}
+
 func TestExpiringTestWindowTemporarilyOverridesBlackout(t *testing.T) {
 	location, _ := time.LoadLocation("Australia/Brisbane")
 	now := time.Date(2026, 8, 28, 22, 0, 0, 0, location)

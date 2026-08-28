@@ -33,6 +33,7 @@ func (f *Fake) Publish(_ context.Context, png []byte, _ time.Duration) error {
 	f.lastPNG = bytes.Clone(png)
 	f.lastHash = digest
 	f.hasFrame = true
+	f.status.ScreenOn = true
 	f.status.Frames++
 	f.status.LastFrameAt = time.Now().UTC()
 	f.status.LastError = ""

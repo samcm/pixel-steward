@@ -34,6 +34,9 @@ example values, and deployment primitives.
 ## Design invariants
 
 - Exactly one controller owns display publication.
+- Daylight arms the display without starting adapter fallback content; the
+  panel turns on with the first steward frame, which is then held exclusively
+  until another frame or blackout.
 - Persona configuration never selects a provider, endpoint, model, or reasoning
   level; the controller binds its independently configured inference profile to
   each lease and records that binding in history.

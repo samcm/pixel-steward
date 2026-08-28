@@ -161,6 +161,17 @@ func (s *Service) Tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if lease != nil {
+		if _, _, personaErr := s.persona(lease.PersonaID); personaErr != nil {
+			s.stop(lease.ID)
+			if err := s.store.EndLease(ctx, lease.ID, "revoked"); err != nil {
+				return err
+			}
+			_ = s.executor.Destroy(ctx, lease.ID)
+			s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "lease.ended", Payload: jsonValue(map[string]string{"reason": "persona_removed"})})
+			lease = nil
+		}
+	}
 	if lease != nil && !now.Before(lease.EndsAt) {
 		s.stop(lease.ID)
 		if err := s.store.EndLease(ctx, lease.ID, "complete"); err != nil {
@@ -415,7 +426,10 @@ func (s *Service) Publish(ctx context.Context, token, contentType string, source
 	}
 	record := domain.Frame{LeaseID: lease.ID, PersonaID: lease.PersonaID, Sequence: sequence, CreatedAt: now,
 		SourceObject: sourceObject.Key, FinalObject: finalObject.Key, SHA256: processed.SHA256, Width: processed.Width, Height: processed.Height}
-	publishErr := s.display.Publish(ctx, processed.PNG, time.Second)
+	// A zero hold asks stateful display adapters to retain this frame until the
+	// next steward frame or an explicit blackout, preventing fallback content
+	// from being interleaved between renderer updates.
+	publishErr := s.display.Publish(ctx, processed.PNG, 0)
 	record.Published = publishErr == nil
 	if publishErr != nil {
 		record.PublishError = publishErr.Error()
@@ -868,6 +882,18 @@ func (s *Service) enforceScreen(ctx context.Context, on bool) error {
 		return nil
 	}
 	s.mu.Unlock()
+	// Daylight arms the display but does not wake an adapter's autonomous
+	// content loop. Publishing the first steward frame turns the panel on. This
+	// keeps a slow-thinking agent from causing unrelated fallback frames and
+	// gives the steward exclusive ownership from its first frame until blackout.
+	if on {
+		s.mu.Lock()
+		s.screenState = new(bool)
+		*s.screenState = true
+		s.mu.Unlock()
+		s.event(ctx, domain.Event{At: s.clock(), Actor: "controller", Type: "display.armed", Payload: json.RawMessage(`{}`)})
+		return nil
+	}
 	if err := s.display.SetScreen(ctx, on); err != nil {
 		return err
 	}

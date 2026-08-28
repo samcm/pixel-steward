@@ -8,12 +8,12 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestHTTPAdapterContract(t *testing.T) {
 	var mu sync.Mutex
 	var published, screenCommands int
+	var hold string
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -29,6 +29,7 @@ func TestHTTPAdapterContract(t *testing.T) {
 				return
 			}
 			defer file.Close()
+			hold = request.FormValue("seconds")
 			if payload, _ := io.ReadAll(file); string(payload) != "png" {
 				t.Errorf("payload = %q", payload)
 			}
@@ -48,7 +49,7 @@ func TestHTTPAdapterContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.Publish(context.Background(), []byte("png"), time.Second); err != nil {
+	if err := adapter.Publish(context.Background(), []byte("png"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := adapter.SetScreen(context.Background(), false); err != nil {
@@ -58,8 +59,8 @@ func TestHTTPAdapterContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.Online || published != 1 || screenCommands != 1 {
-		t.Fatalf("status=%+v published=%d screen=%d", status, published, screenCommands)
+	if !status.Online || published != 1 || screenCommands != 1 || hold != "0" {
+		t.Fatalf("status=%+v published=%d screen=%d hold=%q", status, published, screenCommands, hold)
 	}
 }
 

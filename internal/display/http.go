@@ -63,7 +63,7 @@ func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) erro
 	if err != nil {
 		return err
 	}
-	_, _ = io.WriteString(seconds, strconv.FormatInt(max(1, int64(hold.Seconds())), 10))
+	_, _ = io.WriteString(seconds, strconv.FormatInt(max(0, int64(hold.Seconds())), 10))
 	file, err := writer.CreateFormFile("file", "frame.png")
 	if err != nil {
 		return err
