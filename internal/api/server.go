@@ -77,7 +77,7 @@ func (s *Server) status(response http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) personas(response http.ResponseWriter, request *http.Request) {
-	value, err := s.service.Store().ListPersonas(request.Context())
+	value, err := s.service.Personas(request.Context())
 	writeJSON(response, value, err)
 }
 

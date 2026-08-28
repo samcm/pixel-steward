@@ -484,6 +484,28 @@ func (s *Service) SetPersonaEnabled(ctx context.Context, id string, enabled bool
 	return nil
 }
 
+// Personas returns only identities present in desired configuration. Historic
+// rows remain in durable storage so leases, frames, and transcripts keep their
+// foreign-key history, but removed identities must not reappear as selectable
+// personas in the operator UI.
+func (s *Service) Personas(ctx context.Context) ([]domain.Persona, error) {
+	stored, err := s.store.ListPersonas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	configured := make(map[string]struct{}, len(s.config.Personas))
+	for _, persona := range s.config.Personas {
+		configured[persona.ID] = struct{}{}
+	}
+	result := make([]domain.Persona, 0, len(configured))
+	for _, persona := range stored {
+		if _, ok := configured[persona.ID]; ok {
+			result = append(result, persona)
+		}
+	}
+	return result, nil
+}
+
 func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, error) {
 	_, configured, err := s.persona(id)
 	if err != nil {
