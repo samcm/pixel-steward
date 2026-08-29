@@ -63,10 +63,12 @@ type Storage struct {
 }
 
 type Display struct {
-	Adapter  string   `yaml:"adapter"`
-	BaseURL  string   `yaml:"base_url"`
-	MaxFPS   float64  `yaml:"max_fps"`
-	Blackout TimeSpan `yaml:"blackout"`
+	Adapter     string   `yaml:"adapter"`
+	BaseURL     string   `yaml:"base_url"`
+	MaxFPS      float64  `yaml:"max_fps"`
+	PublishMode string   `yaml:"publish_mode"`
+	Source      string   `yaml:"source"`
+	Blackout    TimeSpan `yaml:"blackout"`
 }
 
 type TimeSpan struct {
@@ -216,6 +218,12 @@ func (c *Config) setDefaults() error {
 	if c.Display.MaxFPS == 0 {
 		c.Display.MaxFPS = 1
 	}
+	if c.Display.PublishMode == "" {
+		c.Display.PublishMode = "immediate"
+	}
+	if c.Display.Source == "" {
+		c.Display.Source = "pixel-steward"
+	}
 	if c.Scheduler.DefaultLease == 0 {
 		c.Scheduler.DefaultLease = Duration(24 * time.Hour)
 	}
@@ -269,6 +277,12 @@ func (c Config) Validate() error {
 	}
 	if c.Display.MaxFPS <= 0 || c.Display.MaxFPS > 60 {
 		problems = append(problems, errors.New("display.max_fps must be greater than zero and no more than 60"))
+	}
+	if c.Display.PublishMode != "immediate" && c.Display.PublishMode != "buffered_stream" {
+		problems = append(problems, errors.New("display.publish_mode must be immediate or buffered_stream"))
+	}
+	if c.Display.PublishMode == "buffered_stream" && strings.TrimSpace(c.Display.Source) == "" {
+		problems = append(problems, errors.New("display.source is required for buffered_stream mode"))
 	}
 	if err := validateTimeSpan("display.blackout", c.Display.Blackout); err != nil {
 		problems = append(problems, err)

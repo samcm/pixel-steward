@@ -17,6 +17,8 @@ storage:
 display:
   adapter: fake
   max_fps: 1
+  publish_mode: immediate
+  source: pixel-steward
   blackout:
     start: "21:00"
     end: "09:00"

@@ -72,6 +72,12 @@ adapter without changing agent-facing contracts. The included compose stack is
 a deliberately inert development setup: fake display, disabled inference, and
 disabled sandbox execution.
 
+The HTTP display adapter supports `publish_mode: buffered_stream` for proxies
+which expose `/api/stream/frame`. In that mode Pixel Steward supplies its stable
+`display.source` on every frame, allowing the proxy to hold a producer lease and
+assemble sampled still images into device-side animation clips. The default
+`immediate` mode remains compatible with simple `/api/image` adapters.
+
 ## Operator interface
 
 The interface is a Preact + TypeScript application in `web/`, built by Vite into

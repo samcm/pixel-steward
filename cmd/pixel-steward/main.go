@@ -182,7 +182,7 @@ func buildObjects(ctx context.Context, cfg config.Config) (objectstore.Store, er
 
 func buildDisplay(cfg config.Config) (display.Display, error) {
 	if cfg.Display.Adapter == "http" {
-		return display.NewHTTP(cfg.Display.BaseURL, cfg.Display.MaxFPS)
+		return display.NewHTTP(cfg.Display.BaseURL, cfg.Display.MaxFPS, cfg.Display.PublishMode, cfg.Display.Source)
 	}
 	return display.NewFake(), nil
 }

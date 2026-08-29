@@ -46,7 +46,7 @@ func TestHTTPAdapterContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter, err := NewHTTP(server.URL, 100)
+	adapter, err := NewHTTP(server.URL, 100, "immediate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,12 +65,46 @@ func TestHTTPAdapterContract(t *testing.T) {
 	}
 }
 
+func TestHTTPAdapterBufferedStreamContract(t *testing.T) {
+	var path, source, hold string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		path = request.URL.Path
+		if err := request.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm() error = %v", err)
+		}
+		source = request.FormValue("source")
+		hold = request.FormValue("seconds")
+		file, _, err := request.FormFile("file")
+		if err != nil {
+			t.Errorf("FormFile() error = %v", err)
+			return
+		}
+		defer file.Close()
+		if payload, _ := io.ReadAll(file); string(payload) != "png" {
+			t.Errorf("payload = %q", payload)
+		}
+		response.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	adapter, err := NewHTTP(server.URL, 100, "buffered_stream", "pixel-steward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Publish(context.Background(), []byte("png"), 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/stream/frame" || source != "pixel-steward" || hold != "5" {
+		t.Fatalf("path=%q source=%q hold=%q", path, source, hold)
+	}
+}
+
 func TestHTTPStatusUnderstandsScreenOff(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		_, _ = response.Write([]byte(`{"device":{"online":true},"screen_off":true}`))
 	}))
 	defer server.Close()
-	client, err := NewHTTP(server.URL, 1)
+	client, err := NewHTTP(server.URL, 1, "immediate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +131,7 @@ func TestHTTPStatusPrefersAuthoritativeErrorTime(t *testing.T) {
 		}})
 	}))
 	defer server.Close()
-	client, err := NewHTTP(server.URL, 1)
+	client, err := NewHTTP(server.URL, 1, "immediate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +168,7 @@ func TestHTTPStatusFallsBackWhenErrorTimeAbsent(t *testing.T) {
 		_, _ = response.Write([]byte(`{"device":{"online":false,"last_error":"panel refused frame"}}`))
 	}))
 	defer server.Close()
-	client, err := NewHTTP(server.URL, 1)
+	client, err := NewHTTP(server.URL, 1, "immediate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +193,7 @@ func TestHTTPStatusWithoutErrorHasNoErrorTime(t *testing.T) {
 		_, _ = response.Write([]byte(`{"device":{"online":true,"frames":12}}`))
 	}))
 	defer server.Close()
-	client, err := NewHTTP(server.URL, 1)
+	client, err := NewHTTP(server.URL, 1, "immediate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +221,7 @@ func TestHTTPStatusFallbackResetsBetweenErrors(t *testing.T) {
 		_, _ = response.Write([]byte(body))
 	}))
 	defer server.Close()
-	client, err := NewHTTP(server.URL, 1)
+	client, err := NewHTTP(server.URL, 1, "immediate", "")
 	if err != nil {
 		t.Fatal(err)
 	}

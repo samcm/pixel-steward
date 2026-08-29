@@ -21,6 +21,8 @@ import (
 type HTTP struct {
 	baseURL string
 	client  *http.Client
+	path    string
+	source  string
 
 	mu          sync.Mutex
 	lastSend    time.Time
@@ -29,7 +31,7 @@ type HTTP struct {
 	lastErrorAt time.Time
 }
 
-func NewHTTP(baseURL string, maxFPS float64) (*HTTP, error) {
+func NewHTTP(baseURL string, maxFPS float64, publishMode, source string) (*HTTP, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return nil, fmt.Errorf("display base URL must be an absolute HTTP URL")
@@ -37,10 +39,23 @@ func NewHTTP(baseURL string, maxFPS float64) (*HTTP, error) {
 	if maxFPS <= 0 {
 		return nil, fmt.Errorf("max FPS must be greater than zero")
 	}
+	path := "/api/image"
+	switch publishMode {
+	case "", "immediate":
+	case "buffered_stream":
+		path = "/api/stream/frame"
+		if strings.TrimSpace(source) == "" {
+			return nil, fmt.Errorf("display source is required for buffered stream publishing")
+		}
+	default:
+		return nil, fmt.Errorf("unknown display publish mode %q", publishMode)
+	}
 
 	return &HTTP{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  &http.Client{Timeout: 15 * time.Second},
+		path:    path,
+		source:  strings.TrimSpace(source),
 		minimum: time.Duration(float64(time.Second) / maxFPS),
 	}, nil
 }
@@ -66,6 +81,13 @@ func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) erro
 		return err
 	}
 	_, _ = io.WriteString(seconds, strconv.FormatInt(max(0, int64(hold.Seconds())), 10))
+	if h.source != "" {
+		source, err := writer.CreateFormField("source")
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(source, h.source)
+	}
 	file, err := writer.CreateFormFile("file", "frame.png")
 	if err != nil {
 		return err
@@ -77,7 +99,7 @@ func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) erro
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.baseURL+"/api/image", &body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.baseURL+h.path, &body)
 	if err != nil {
 		return err
 	}
