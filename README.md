@@ -21,8 +21,10 @@ example values, and deployment primitives.
 - inference routing selected independently from persona identity and character;
 - hard per-lease call, token, active-runtime, scene-commit, and optional cost
   ledgers visible to the persona through `studio_budget`;
-- provider-native OpenCode token, reasoning-token, cache-token, and cost event
-  capture;
+- pluggable Hermes and OpenCode runtimes with provider-native token,
+  reasoning-token, cache-token, model-call, and cost capture;
+- fresh Hermes sessions per wake with durable, isolated per-persona memory and
+  exact persisted assistant/tool transcripts;
 - flexible read-only PostgreSQL history through `studio_sql`;
 - agent-authored 1-3 sentence journal entries, exposed as `history_journal`, so
   future agents can recover intent without decoding runtime telemetry;
@@ -74,7 +76,8 @@ disabled sandbox execution.
 
 The interface is a Preact + TypeScript application in `web/`, built by Vite into
 content-hashed assets and embedded into the Go binary from `internal/api/dist`.
-Production runs the single static binary: no Node runtime, no asset server.
+The operator interface is served by the single static binary, with no separate
+asset server or frontend process.
 
 ```sh
 make ui     # npm ci + vite build into internal/api/dist
@@ -117,6 +120,20 @@ npm --prefix web test
 
 There is intentionally no tool for changing reasoning effort, budgets, leases,
 blackout, or display rate.
+
+## Agent runtimes
+
+`runtime.driver: hermes` starts a fresh Hermes one-shot for each wake and keeps
+each persona's Hermes home and memory isolated under the configured workspace
+root. The runtime enables only the lease-scoped `studio` MCP server. Native
+Hermes terminal and web tools are not exposed, so arbitrary code and Docker
+workloads still cross the configured disposable-executor boundary. Automatic
+session-title inference is disabled; every auxiliary inference that does run is
+included in the persisted usage report.
+
+`runtime.driver: opencode` remains available for deployments that prefer the
+OpenCode executor. Persona identity and model routing are independent of the
+selected runtime in both cases.
 
 ## Production deployment
 

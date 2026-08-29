@@ -11,14 +11,15 @@ export interface InferenceLedgerProps {
   onRetry: () => void;
 }
 
-const COLUMNS = 13;
+const COLUMNS = 14;
 
 export function InferenceLedger(props: InferenceLedgerProps) {
   const { requests, loading, error, onRetry } = props;
 
   const totals = useMemo(() => {
-    const sum = { prompt: 0, completion: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, micros: 0, ms: 0 };
+    const sum = { calls: 0, prompt: 0, completion: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, micros: 0, ms: 0 };
     for (const request of requests) {
+      sum.calls += request.model_calls;
       sum.prompt += request.prompt_tokens;
       sum.completion += request.completion_tokens;
       sum.reasoning += request.reasoning_tokens;
@@ -35,7 +36,8 @@ export function InferenceLedger(props: InferenceLedgerProps) {
 
   const meta = (
     <span class="rec-meta">
-      {requests.length} {requests.length === 1 ? 'request' : 'requests'} · {money(totals.micros)} estimated
+      {requests.length} {requests.length === 1 ? 'record' : 'records'} · {count(totals.calls)} model calls ·{' '}
+      {money(totals.micros)} estimated
     </span>
   );
 
@@ -53,6 +55,7 @@ export function InferenceLedger(props: InferenceLedgerProps) {
                 <th>persona</th>
                 <th>provider / model</th>
                 <th>reasoning</th>
+                <th class="rec-num">calls</th>
                 <th class="rec-num">prompt</th>
                 <th class="rec-num">completion</th>
                 <th class="rec-num">reasoning tok</th>
@@ -113,6 +116,7 @@ export function InferenceLedger(props: InferenceLedgerProps) {
                       <td class="rec-mono" title={`source: ${request.thinking_source || 'unknown'}`}>
                         {request.thinking || '—'}
                       </td>
+                      <td class="rec-num">{count(request.model_calls)}</td>
                       <td class="rec-num">{count(request.prompt_tokens)}</td>
                       <td class="rec-num">{count(request.completion_tokens)}</td>
                       <td class="rec-num">{count(request.reasoning_tokens)}</td>
@@ -148,6 +152,7 @@ export function InferenceLedger(props: InferenceLedgerProps) {
                 <td />
                 <td />
                 <td class="rec-mono rec-tone-muted">totals</td>
+                <td class="rec-num">{count(totals.calls)}</td>
                 <td class="rec-num">{count(totals.prompt)}</td>
                 <td class="rec-num">{count(totals.completion)}</td>
                 <td class="rec-num">{count(totals.reasoning)}</td>

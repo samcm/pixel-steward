@@ -86,12 +86,16 @@ func serve(arguments []string) error {
 		return err
 	}
 	var runner agent.Runner = agent.Disabled{}
-	if cfg.Runtime.Driver == "opencode" {
+	if cfg.Runtime.Driver == "opencode" || cfg.Runtime.Driver == "hermes" {
 		executable, err := os.Executable()
 		if err != nil {
 			return err
 		}
-		runner, err = runtime.NewOpenCode(cfg.Runtime, database, executable)
+		if cfg.Runtime.Driver == "hermes" {
+			runner, err = runtime.NewHermes(cfg.Runtime, database, executable)
+		} else {
+			runner, err = runtime.NewOpenCode(cfg.Runtime, database, executable)
+		}
 		if err != nil {
 			return err
 		}

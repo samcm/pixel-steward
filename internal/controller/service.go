@@ -661,6 +661,9 @@ func (s *Service) PersonaDetail(ctx context.Context, id string) (PersonaDetail, 
 	}
 	detail.Configuration = map[string]any{
 		"character_brief": string(soul),
+		"runtime": map[string]any{
+			"driver": s.config.Runtime.Driver, "persona_memory": s.config.Runtime.Driver == "hermes",
+		},
 		"persona": map[string]any{
 			"id": configured.ID, "display_name": configured.DisplayName, "enabled_default": configured.Enabled,
 			"enabled_effective": persona.Enabled, "weight": configured.Weight, "cooldown": persona.Cooldown.String(),
@@ -918,7 +921,7 @@ func (s *Service) ensureLeaseState(ctx context.Context, lease *domain.Lease) err
 				Reasoning: request.ReasoningTokens, CacheRead: request.CacheReadTokens, CacheWrite: request.CacheWriteTokens},
 				Cost: budget.CostUsage{EstimatedMeteredMicros: request.EstimatedMeteredMicros,
 					ProviderReportedMicros: request.ProviderReportedMicros, ActualBilledMicros: request.ActualBilledMicros},
-				ActiveRuntime: request.EndedAt.Sub(request.StartedAt)})
+				ActiveRuntime: request.EndedAt.Sub(request.StartedAt), ModelCalls: request.ModelCalls})
 		}
 		s.mu.Lock()
 		s.ledgers[lease.ID] = ledger

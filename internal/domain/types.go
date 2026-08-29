@@ -104,6 +104,7 @@ type InferenceRequest struct {
 	EndedAt                *time.Time      `json:"ended_at,omitempty"`
 	Status                 string          `json:"status"`
 	StopReason             string          `json:"stop_reason,omitempty"`
+	ModelCalls             int64           `json:"model_calls"`
 	PromptTokens           int64           `json:"prompt_tokens"`
 	CompletionTokens       int64           `json:"completion_tokens"`
 	ReasoningTokens        int64           `json:"reasoning_tokens"`

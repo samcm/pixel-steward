@@ -473,6 +473,9 @@ function Inference(props: { requests: InferenceRequest[] }) {
           <th scope="col">Provider / model</th>
           <th scope="col">Reasoning</th>
           <th scope="col" class="num">
+            Calls
+          </th>
+          <th scope="col" class="num">
             Prompt
           </th>
           <th scope="col" class="num">
@@ -502,6 +505,7 @@ function Inference(props: { requests: InferenceRequest[] }) {
               {request.thinking}
               {request.thinking_source ? <span class="hint"> {request.thinking_source}</span> : null}
             </td>
+            <td class="num mono">{count(request.model_calls)}</td>
             <td class="num mono">{count(request.prompt_tokens)}</td>
             <td class="num mono">{count(request.completion_tokens)}</td>
             <td class="num mono">{count(request.reasoning_tokens)}</td>

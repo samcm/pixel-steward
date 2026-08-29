@@ -49,6 +49,7 @@ type Actual struct {
 	Tokens        TokenUsage
 	Cost          CostUsage
 	ActiveRuntime time.Duration
+	ModelCalls    int64
 }
 
 type Reservation struct {
@@ -180,7 +181,11 @@ func (l *Ledger) Complete(id uint64, actual Actual, now time.Time) error {
 	l.usedTokens.CacheWrite += actual.Tokens.CacheWrite
 	l.usedTokens.Image += actual.Tokens.Image
 	l.usedTokens.Audio += actual.Tokens.Audio
-	l.usedCalls++
+	modelCalls := actual.ModelCalls
+	if modelCalls <= 0 {
+		modelCalls = 1
+	}
+	l.usedCalls += modelCalls
 	l.usedRuntime += runtime
 	l.usedCost += actual.Cost.EstimatedMeteredMicros
 
@@ -214,7 +219,11 @@ func (l *Ledger) Restore(actual Actual) error {
 	l.usedTokens.CacheWrite += actual.Tokens.CacheWrite
 	l.usedTokens.Image += actual.Tokens.Image
 	l.usedTokens.Audio += actual.Tokens.Audio
-	l.usedCalls++
+	modelCalls := actual.ModelCalls
+	if modelCalls <= 0 {
+		modelCalls = 1
+	}
+	l.usedCalls += modelCalls
 	l.usedRuntime += actual.ActiveRuntime
 	l.usedCost += actual.Cost.EstimatedMeteredMicros
 	return nil

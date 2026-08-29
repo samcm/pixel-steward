@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS inference_requests (
   ended_at timestamptz,
   status text NOT NULL,
   stop_reason text NOT NULL DEFAULT '',
+  model_calls bigint NOT NULL DEFAULT 1,
   prompt_tokens bigint NOT NULL DEFAULT 0,
   completion_tokens bigint NOT NULL DEFAULT 0,
   reasoning_tokens bigint NOT NULL DEFAULT 0,
@@ -90,6 +91,7 @@ CREATE TABLE IF NOT EXISTS inference_requests (
   allocated_cost_micros bigint,
   raw_usage jsonb
 );
+ALTER TABLE inference_requests ADD COLUMN IF NOT EXISTS model_calls bigint NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS schedules (
   id text PRIMARY KEY,
   lease_id text NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
@@ -407,18 +409,18 @@ func (p *Postgres) ListFrames(ctx context.Context, leaseID string, limit int) ([
 func (p *Postgres) UpsertInferenceRequest(ctx context.Context, request domain.InferenceRequest) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO inference_requests
     (id,lease_id,persona_id,provider,model,thinking,thinking_source,provider_request_id,started_at,ended_at,status,
-     stop_reason,prompt_tokens,completion_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,
+     stop_reason,model_calls,prompt_tokens,completion_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,
      estimated_metered_micros,provider_reported_micros,actual_billed_micros,allocated_cost_micros,raw_usage)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
     ON CONFLICT (id) DO UPDATE SET provider_request_id=EXCLUDED.provider_request_id, ended_at=EXCLUDED.ended_at,
-    status=EXCLUDED.status, stop_reason=EXCLUDED.stop_reason, prompt_tokens=EXCLUDED.prompt_tokens,
+    status=EXCLUDED.status, stop_reason=EXCLUDED.stop_reason, model_calls=EXCLUDED.model_calls, prompt_tokens=EXCLUDED.prompt_tokens,
     completion_tokens=EXCLUDED.completion_tokens, reasoning_tokens=EXCLUDED.reasoning_tokens,
     cache_read_tokens=EXCLUDED.cache_read_tokens, cache_write_tokens=EXCLUDED.cache_write_tokens,
     estimated_metered_micros=EXCLUDED.estimated_metered_micros, provider_reported_micros=EXCLUDED.provider_reported_micros,
     actual_billed_micros=EXCLUDED.actual_billed_micros, allocated_cost_micros=EXCLUDED.allocated_cost_micros,
     raw_usage=EXCLUDED.raw_usage`, request.ID, request.LeaseID, request.PersonaID, request.Provider, request.Model,
 		request.Thinking, request.ThinkingSource, request.ProviderRequestID, request.StartedAt, request.EndedAt, request.Status,
-		request.StopReason, request.PromptTokens, request.CompletionTokens, request.ReasoningTokens, request.CacheReadTokens,
+		request.StopReason, request.ModelCalls, request.PromptTokens, request.CompletionTokens, request.ReasoningTokens, request.CacheReadTokens,
 		request.CacheWriteTokens, request.EstimatedMeteredMicros, request.ProviderReportedMicros, request.ActualBilledMicros,
 		request.AllocatedCostMicros, nullableJSON(request.RawUsage))
 	return err
@@ -429,7 +431,7 @@ func (p *Postgres) ListInferenceRequests(ctx context.Context, leaseID string, li
 		limit = 1000
 	}
 	rows, err := p.pool.Query(ctx, `SELECT id,lease_id,persona_id,provider,model,thinking,thinking_source,
-    provider_request_id,started_at,ended_at,status,stop_reason,prompt_tokens,completion_tokens,reasoning_tokens,
+    provider_request_id,started_at,ended_at,status,stop_reason,model_calls,prompt_tokens,completion_tokens,reasoning_tokens,
     cache_read_tokens,cache_write_tokens,estimated_metered_micros,provider_reported_micros,actual_billed_micros,
     allocated_cost_micros,raw_usage FROM inference_requests WHERE ($1='' OR lease_id=$1) ORDER BY started_at DESC LIMIT $2`, leaseID, limit)
 	if err != nil {
@@ -441,7 +443,7 @@ func (p *Postgres) ListInferenceRequests(ctx context.Context, leaseID string, li
 		var request domain.InferenceRequest
 		if err := rows.Scan(&request.ID, &request.LeaseID, &request.PersonaID, &request.Provider, &request.Model,
 			&request.Thinking, &request.ThinkingSource, &request.ProviderRequestID, &request.StartedAt, &request.EndedAt,
-			&request.Status, &request.StopReason, &request.PromptTokens, &request.CompletionTokens, &request.ReasoningTokens,
+			&request.Status, &request.StopReason, &request.ModelCalls, &request.PromptTokens, &request.CompletionTokens, &request.ReasoningTokens,
 			&request.CacheReadTokens, &request.CacheWriteTokens, &request.EstimatedMeteredMicros,
 			&request.ProviderReportedMicros, &request.ActualBilledMicros, &request.AllocatedCostMicros, &request.RawUsage); err != nil {
 			return nil, err

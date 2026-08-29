@@ -157,7 +157,7 @@ func (o *OpenCode) Run(parent context.Context, wake agent.Wake) error {
 			ID: newRequestID(wake.Lease.ID, stepIndex), LeaseID: wake.Lease.ID, PersonaID: wake.Persona.ID,
 			Provider: wake.Profile.Provider, Model: wake.Profile.Model, Thinking: wake.Lease.Thinking,
 			ThinkingSource: "controller_config", ProviderRequestID: event.Part.MessageID, StartedAt: activeReservation.StartedAt,
-			EndedAt: &ended, Status: "completed", StopReason: event.Part.Reason, PromptTokens: usage.Input,
+			EndedAt: &ended, Status: "completed", StopReason: event.Part.Reason, ModelCalls: 1, PromptTokens: usage.Input,
 			CompletionTokens: usage.Output, ReasoningTokens: usage.Reasoning, CacheReadTokens: usage.Cache.Read,
 			CacheWriteTokens: usage.Cache.Write, EstimatedMeteredMicros: costMicros, ProviderReportedMicros: &costMicros,
 			RawUsage: raw,

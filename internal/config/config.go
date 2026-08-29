@@ -288,7 +288,7 @@ func (c Config) Validate() error {
 		problems = append(problems, errors.New("inference.blackout_behavior must be suspend or terminate"))
 	}
 	profile, hasInferenceProfile := c.ModelProfiles[c.Inference.ModelProfile]
-	if c.Runtime.Driver == "opencode" && !hasInferenceProfile {
+	if (c.Runtime.Driver == "opencode" || c.Runtime.Driver == "hermes") && !hasInferenceProfile {
 		problems = append(problems, fmt.Errorf("inference.model_profile %q does not exist", c.Inference.ModelProfile))
 	}
 	if hasInferenceProfile && len(profile.Thinking.Allowed) > 0 && !contains(profile.Thinking.Allowed, c.Inference.DefaultThinking) {
@@ -324,11 +324,11 @@ func (c Config) Validate() error {
 	if c.Storage.Driver == "s3" && (c.Storage.Endpoint == "" || c.Storage.Bucket == "" || c.Storage.AccessKeyEnv == "" || c.Storage.SecretKeyEnv == "") {
 		problems = append(problems, errors.New("storage.endpoint, storage.bucket, storage.access_key_env, and storage.secret_key_env are required for s3"))
 	}
-	if c.Runtime.Driver != "disabled" && c.Runtime.Driver != "opencode" {
-		problems = append(problems, errors.New("runtime.driver must be disabled or opencode"))
+	if c.Runtime.Driver != "disabled" && c.Runtime.Driver != "opencode" && c.Runtime.Driver != "hermes" {
+		problems = append(problems, errors.New("runtime.driver must be disabled, opencode, or hermes"))
 	}
-	if c.Runtime.Driver == "opencode" && (len(c.Runtime.Command) == 0 || c.Runtime.ControllerURL == "") {
-		problems = append(problems, errors.New("runtime.command and runtime.controller_url are required for opencode"))
+	if (c.Runtime.Driver == "opencode" || c.Runtime.Driver == "hermes") && (len(c.Runtime.Command) == 0 || c.Runtime.ControllerURL == "") {
+		problems = append(problems, fmt.Errorf("runtime.command and runtime.controller_url are required for %s", c.Runtime.Driver))
 	}
 	if c.Runtime.MaxSteps <= 0 {
 		problems = append(problems, errors.New("runtime.max_steps must be greater than zero"))

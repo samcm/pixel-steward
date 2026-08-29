@@ -64,6 +64,25 @@ func TestCompleteReconcilesReservation(t *testing.T) {
 	}
 }
 
+func TestCompleteRecordsAggregateModelCalls(t *testing.T) {
+	ledger, err := New(Limits{InputTokens: 100, OutputTokens: 100, ModelCalls: 5,
+		ActiveRuntime: time.Minute, SceneCommits: 1, PerCallOutput: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	reservation, err := ledger.Reserve(now, Estimate{InputTokens: 1, MaxOutputTokens: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Complete(reservation.ID, Actual{ModelCalls: 3}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if calls := ledger.Snapshot(now.Add(time.Second)).Calls; calls.Used != 3 || calls.Remaining != 2 {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
 func TestUnknownCostIsNotZero(t *testing.T) {
 	ledger, err := New(Limits{InputTokens: 1, OutputTokens: 1, ModelCalls: 1, ActiveRuntime: time.Second, SceneCommits: 1, PerCallOutput: 1})
 	if err != nil {

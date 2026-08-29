@@ -47,6 +47,7 @@ inference:
 runtime:
   driver: disabled
   workspace_root: /var/lib/pixel-steward/workspaces
+  # Hermes: command: [pixel-steward-hermes]
 
 sandbox:
   driver: disabled

@@ -72,6 +72,7 @@ export interface InferenceRequest {
   ended_at?: string;
   status: string;
   stop_reason?: string;
+  model_calls: number;
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
