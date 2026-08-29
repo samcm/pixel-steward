@@ -21,16 +21,16 @@ func NewFake() *Fake {
 	return &Fake{status: Status{Online: true, ScreenOn: true}}
 }
 
-func (f *Fake) Publish(_ context.Context, png []byte, _ time.Duration) error {
+func (f *Fake) Publish(_ context.Context, asset []byte, _ string, _ time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	digest := sha256.Sum256(png)
+	digest := sha256.Sum256(asset)
 	if f.hasFrame && digest == f.lastHash {
 		f.status.Skipped++
 		return nil
 	}
-	f.lastPNG = bytes.Clone(png)
+	f.lastPNG = bytes.Clone(asset)
 	f.lastHash = digest
 	f.hasFrame = true
 	f.status.ScreenOn = true

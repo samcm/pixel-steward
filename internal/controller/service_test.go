@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/gif"
 	"strings"
 	"sync"
 	"testing"
@@ -222,6 +225,41 @@ func TestRendererPreviewDoesNotCommitPhysicalDisplay(t *testing.T) {
 	}
 	if !committed.Published || status.Frames != 1 {
 		t.Fatalf("explicit commit did not reach physical display: frame=%+v status=%+v", committed, status)
+	}
+}
+
+func TestExplicitGIFCommitPreservesAnimationAsset(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := display.NewFake()
+	service := testService(t, &now, agent.Disabled{}, panel)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.store.ActiveLease(context.Background())
+	if err != nil || lease == nil {
+		t.Fatalf("active lease = %+v, error = %v", lease, err)
+	}
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+
+	palette := color.Palette{color.Black, color.White}
+	first := image.NewPaletted(image.Rect(0, 0, 2, 2), palette)
+	second := image.NewPaletted(image.Rect(0, 0, 2, 2), palette)
+	second.Pix[0] = 1
+	var animated bytes.Buffer
+	if err := gif.EncodeAll(&animated, &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{10, 10}}); err != nil {
+		t.Fatal(err)
+	}
+	raw := bytes.Clone(animated.Bytes())
+
+	committed, err := service.publish(context.Background(), token, "image/gif", bytes.NewReader(raw), false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !committed.Published || !bytes.Equal(panel.LastPNG(), raw) {
+		t.Fatal("explicit GIF commit was flattened before reaching the display")
 	}
 }
 

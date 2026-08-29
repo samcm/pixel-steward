@@ -60,7 +60,7 @@ func NewHTTP(baseURL string, maxFPS float64, publishMode, source string) (*HTTP,
 	}, nil
 }
 
-func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) error {
+func (h *HTTP) Publish(ctx context.Context, asset []byte, contentType string, hold time.Duration) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -88,18 +88,26 @@ func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) erro
 		}
 		_, _ = io.WriteString(source, h.source)
 	}
-	file, err := writer.CreateFormFile("file", "frame.png")
+	path := h.path
+	filename := "frame.png"
+	buffered := path == "/api/stream/frame"
+	if contentType == "image/gif" {
+		path = "/api/image"
+		filename = "animation.gif"
+		buffered = false
+	}
+	file, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return err
 	}
-	if _, err := file.Write(png); err != nil {
+	if _, err := file.Write(asset); err != nil {
 		return err
 	}
 	if err := writer.Close(); err != nil {
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.baseURL+h.path, &body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.baseURL+path, &body)
 	if err != nil {
 		return err
 	}
@@ -118,7 +126,7 @@ func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) erro
 	if err := response.Body.Close(); err != nil {
 		return err
 	}
-	if h.path == "/api/stream/frame" {
+	if buffered {
 		return h.flushStream(ctx, hold)
 	}
 

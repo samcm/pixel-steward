@@ -472,8 +472,16 @@ func (s *Service) publish(ctx context.Context, token, contentType string, source
 		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "agent", Type: "frame.rejected", Payload: jsonValue(map[string]string{"error": err.Error()})})
 		return domain.Frame{}, err
 	}
-	if len(frames) > 0 && frames[0].SHA256 == processed.SHA256 && (!commit || frames[0].Published) {
-		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "frame.duplicate_skipped", Payload: jsonValue(map[string]string{"sha256": processed.SHA256})})
+	displayAsset := processed.PNG
+	displayContentType := "image/png"
+	digest := processed.SHA256
+	if bytes.HasPrefix(data, []byte("GIF8")) {
+		displayAsset = data
+		displayContentType = "image/gif"
+		digest = fmt.Sprintf("%x", sha256.Sum256(data))
+	}
+	if len(frames) > 0 && frames[0].SHA256 == digest && (!commit || frames[0].Published) {
+		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "frame.duplicate_skipped", Payload: jsonValue(map[string]string{"sha256": digest})})
 		return frames[0], nil
 	}
 	sequence := int64(1)
@@ -498,13 +506,13 @@ func (s *Service) publish(ctx context.Context, token, contentType string, source
 		return domain.Frame{}, err
 	}
 	record := domain.Frame{LeaseID: lease.ID, PersonaID: lease.PersonaID, Sequence: sequence, CreatedAt: now,
-		SourceObject: sourceObject.Key, FinalObject: finalObject.Key, SHA256: processed.SHA256, Width: processed.Width, Height: processed.Height}
+		SourceObject: sourceObject.Key, FinalObject: finalObject.Key, SHA256: digest, Width: processed.Width, Height: processed.Height}
 	// A zero hold asks stateful display adapters to retain this frame until the
 	// next explicit scene commit or blackout. Renderer previews never reach the
 	// adapter.
 	var publishErr error
 	if commit {
-		publishErr = s.display.Publish(ctx, processed.PNG, 0)
+		publishErr = s.display.Publish(ctx, displayAsset, displayContentType, 0)
 		record.Published = publishErr == nil
 		if publishErr != nil {
 			record.PublishError = publishErr.Error()

@@ -50,7 +50,7 @@ func TestHTTPAdapterContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.Publish(context.Background(), []byte("png"), 0); err != nil {
+	if err := adapter.Publish(context.Background(), []byte("png"), "image/png", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := adapter.SetScreen(context.Background(), false); err != nil {
@@ -109,11 +109,44 @@ func TestHTTPAdapterBufferedStreamContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.Publish(context.Background(), []byte("png"), 5*time.Second); err != nil {
+	if err := adapter.Publish(context.Background(), []byte("png"), "image/png", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if len(paths) != 2 || paths[0] != "/api/stream/frame" || paths[1] != "/api/stream/flush" || source != "pixel-steward" || hold != "5" {
 		t.Fatalf("paths=%q source=%q hold=%q", paths, source, hold)
+	}
+}
+
+func TestHTTPAdapterSendsFinishedGIFAsOneExplicitAsset(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		if err := request.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm() error = %v", err)
+		}
+		file, header, err := request.FormFile("file")
+		if err != nil {
+			t.Errorf("FormFile() error = %v", err)
+			return
+		}
+		defer file.Close()
+		payload, _ := io.ReadAll(file)
+		if string(payload) != "GIF89a" || header.Filename != "animation.gif" {
+			t.Errorf("file = %q %q", header.Filename, payload)
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter, err := NewHTTP(server.URL, 100, "buffered_stream", "pixel-steward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Publish(context.Background(), []byte("GIF89a"), "image/gif", 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != "/api/image" {
+		t.Fatalf("paths = %q, want one explicit image commit", paths)
 	}
 }
 

@@ -20,7 +20,7 @@ type Status struct {
 }
 
 type Display interface {
-	Publish(context.Context, []byte, time.Duration) error
+	Publish(context.Context, []byte, string, time.Duration) error
 	SetScreen(context.Context, bool) error
 	Status(context.Context) (Status, error)
 }
