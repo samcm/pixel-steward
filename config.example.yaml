@@ -17,8 +17,9 @@ display:
   adapter: fake
   max_fps: 1
   # HTTP adapters may use immediate or buffered_stream publishing. Buffered
-  # mode lets a compatible display proxy assemble still frames into a local
-  # animation and requires a stable source name for its producer lease.
+  # mode commits studio_publish transactions through a compatible proxy and
+  # requires a stable source name for its producer lease. studio_watch remains
+  # preview-only in either mode.
   publish_mode: immediate
   source: pixel-steward
   blackout:

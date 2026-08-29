@@ -408,6 +408,14 @@ func (s *Service) Exec(ctx context.Context, token, command string, timeout time.
 }
 
 func (s *Service) PublishPath(ctx context.Context, token, path string, modelDriven bool) (domain.Frame, error) {
+	return s.publishPath(ctx, token, path, modelDriven, true)
+}
+
+func (s *Service) previewPath(ctx context.Context, token, path string) (domain.Frame, error) {
+	return s.publishPath(ctx, token, path, false, false)
+}
+
+func (s *Service) publishPath(ctx context.Context, token, path string, modelDriven, commit bool) (domain.Frame, error) {
 	lease, err := s.authorize(ctx, token)
 	if err != nil {
 		return domain.Frame{}, err
@@ -420,7 +428,7 @@ func (s *Service) PublishPath(ctx context.Context, token, path string, modelDriv
 		return domain.Frame{}, err
 	}
 	defer source.Close()
-	return s.Publish(ctx, token, contentType, source, modelDriven)
+	return s.publish(ctx, token, contentType, source, modelDriven, commit)
 }
 
 func (s *Service) WatchRenderer(ctx context.Context, token, path string, fps float64) (domain.Schedule, error) {
@@ -436,6 +444,10 @@ func (s *Service) WatchRenderer(ctx context.Context, token, path string, fps flo
 }
 
 func (s *Service) Publish(ctx context.Context, token, contentType string, source io.Reader, modelDriven bool) (domain.Frame, error) {
+	return s.publish(ctx, token, contentType, source, modelDriven, true)
+}
+
+func (s *Service) publish(ctx context.Context, token, contentType string, source io.Reader, modelDriven, commit bool) (domain.Frame, error) {
 	lease, err := s.authorize(ctx, token)
 	if err != nil {
 		return domain.Frame{}, err
@@ -460,7 +472,7 @@ func (s *Service) Publish(ctx context.Context, token, contentType string, source
 		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "agent", Type: "frame.rejected", Payload: jsonValue(map[string]string{"error": err.Error()})})
 		return domain.Frame{}, err
 	}
-	if len(frames) > 0 && frames[0].SHA256 == processed.SHA256 {
+	if len(frames) > 0 && frames[0].SHA256 == processed.SHA256 && (!commit || frames[0].Published) {
 		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "frame.duplicate_skipped", Payload: jsonValue(map[string]string{"sha256": processed.SHA256})})
 		return frames[0], nil
 	}
@@ -488,12 +500,15 @@ func (s *Service) Publish(ctx context.Context, token, contentType string, source
 	record := domain.Frame{LeaseID: lease.ID, PersonaID: lease.PersonaID, Sequence: sequence, CreatedAt: now,
 		SourceObject: sourceObject.Key, FinalObject: finalObject.Key, SHA256: processed.SHA256, Width: processed.Width, Height: processed.Height}
 	// A zero hold asks stateful display adapters to retain this frame until the
-	// next steward frame or an explicit blackout, preventing fallback content
-	// from being interleaved between renderer updates.
-	publishErr := s.display.Publish(ctx, processed.PNG, 0)
-	record.Published = publishErr == nil
-	if publishErr != nil {
-		record.PublishError = publishErr.Error()
+	// next explicit scene commit or blackout. Renderer previews never reach the
+	// adapter.
+	var publishErr error
+	if commit {
+		publishErr = s.display.Publish(ctx, processed.PNG, 0)
+		record.Published = publishErr == nil
+		if publishErr != nil {
+			record.PublishError = publishErr.Error()
+		}
 	}
 	record, storeErr := s.store.AppendFrame(ctx, record)
 	if storeErr != nil {
@@ -831,7 +846,7 @@ func (s *Service) runRenderer(ctx context.Context, lease domain.Lease, schedule 
 	s.mu.Lock()
 	token := s.tokens[lease.ID]
 	s.mu.Unlock()
-	_, publishErr := s.PublishPath(ctx, token, payload.Path, false)
+	_, publishErr := s.previewPath(ctx, token, payload.Path)
 	next := now.Add(schedule.Interval)
 	if !next.Before(lease.EndsAt) {
 		next = time.Time{}

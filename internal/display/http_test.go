@@ -66,22 +66,40 @@ func TestHTTPAdapterContract(t *testing.T) {
 }
 
 func TestHTTPAdapterBufferedStreamContract(t *testing.T) {
-	var path, source, hold string
+	var paths []string
+	var source, hold string
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		path = request.URL.Path
-		if err := request.ParseMultipartForm(1 << 20); err != nil {
-			t.Errorf("ParseMultipartForm() error = %v", err)
-		}
-		source = request.FormValue("source")
-		hold = request.FormValue("seconds")
-		file, _, err := request.FormFile("file")
-		if err != nil {
-			t.Errorf("FormFile() error = %v", err)
+		paths = append(paths, request.URL.Path)
+		switch request.URL.Path {
+		case "/api/stream/frame":
+			if err := request.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("ParseMultipartForm() error = %v", err)
+			}
+			source = request.FormValue("source")
+			hold = request.FormValue("seconds")
+			file, _, err := request.FormFile("file")
+			if err != nil {
+				t.Errorf("FormFile() error = %v", err)
+				return
+			}
+			defer file.Close()
+			if payload, _ := io.ReadAll(file); string(payload) != "png" {
+				t.Errorf("payload = %q", payload)
+			}
+		case "/api/stream/flush":
+			var body struct {
+				Source  string `json:"source"`
+				Seconds int64  `json:"seconds"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("decode flush: %v", err)
+			}
+			if body.Source != "pixel-steward" || body.Seconds != 5 {
+				t.Errorf("flush = %+v", body)
+			}
+		default:
+			http.NotFound(response, request)
 			return
-		}
-		defer file.Close()
-		if payload, _ := io.ReadAll(file); string(payload) != "png" {
-			t.Errorf("payload = %q", payload)
 		}
 		response.WriteHeader(http.StatusAccepted)
 	}))
@@ -94,8 +112,8 @@ func TestHTTPAdapterBufferedStreamContract(t *testing.T) {
 	if err := adapter.Publish(context.Background(), []byte("png"), 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if path != "/api/stream/frame" || source != "pixel-steward" || hold != "5" {
-		t.Fatalf("path=%q source=%q hold=%q", path, source, hold)
+	if len(paths) != 2 || paths[0] != "/api/stream/frame" || paths[1] != "/api/stream/flush" || source != "pixel-steward" || hold != "5" {
+		t.Fatalf("paths=%q source=%q hold=%q", paths, source, hold)
 	}
 }
 

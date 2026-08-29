@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/samcm/pixel-steward/internal/config"
 	"github.com/samcm/pixel-steward/internal/display"
 	"github.com/samcm/pixel-steward/internal/executor"
+	stewardframe "github.com/samcm/pixel-steward/internal/frame"
 	"github.com/samcm/pixel-steward/internal/objectstore"
 	"github.com/samcm/pixel-steward/internal/store"
 )
@@ -178,6 +180,48 @@ func TestAgentWritesCuratedJournalEntry(t *testing.T) {
 	}
 	if _, err := service.WriteJournal(context.Background(), token, "   "); err == nil {
 		t.Fatal("empty journal entry was accepted")
+	}
+}
+
+func TestRendererPreviewDoesNotCommitPhysicalDisplay(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := display.NewFake()
+	service := testService(t, &now, agent.Disabled{}, panel)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.store.ActiveLease(context.Background())
+	if err != nil || lease == nil {
+		t.Fatalf("active lease = %+v, error = %v", lease, err)
+	}
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+	raw := make([]byte, stewardframe.RGBByteSize)
+
+	preview, err := service.publish(context.Background(), token, "application/octet-stream", bytes.NewReader(raw), false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := panel.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Published || status.Frames != 0 {
+		t.Fatalf("preview touched physical display: frame=%+v status=%+v", preview, status)
+	}
+
+	committed, err := service.publish(context.Background(), token, "application/octet-stream", bytes.NewReader(raw), false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err = panel.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !committed.Published || status.Frames != 1 {
+		t.Fatalf("explicit commit did not reach physical display: frame=%+v status=%+v", committed, status)
 	}
 }
 

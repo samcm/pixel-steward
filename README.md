@@ -6,8 +6,8 @@ display credentials or turning inference into a frame loop.
 
 An agent uses a bounded inference session to create assets, timelines, or an
 arbitrary local renderer. Pixel Steward archives output, validates it, samples
-the latest framebuffer at a configured maximum rate, enforces blackout windows,
-and is the only process allowed to talk to the display adapter.
+the latest framebuffer for operator preview, enforces blackout windows, and is
+the only process allowed to commit finished assets to the display adapter.
 
 The project is infrastructure-neutral. Hostnames, addresses, provider keys,
 personas, schedules, and deployment inventory belong in a separate private
@@ -52,7 +52,8 @@ example values, and deployment primitives.
 - Model calls have hard token, call, time, scene-commit, and optional cost caps.
 - Agents can inspect current accounting but cannot increase budgets or change
   reasoning effort.
-- Local renderers can generate every frame without consuming inference tokens.
+- Local renderers can generate every preview frame without consuming inference
+  tokens or hammering the physical panel; display changes are explicit commits.
 - Provider-native token and cost fields are retained without inventing missing
   subscription costs.
 - Configuration can reference environment variables, but secrets are never
@@ -73,10 +74,11 @@ a deliberately inert development setup: fake display, disabled inference, and
 disabled sandbox execution.
 
 The HTTP display adapter supports `publish_mode: buffered_stream` for proxies
-which expose `/api/stream/frame`. In that mode Pixel Steward supplies its stable
-`display.source` on every frame, allowing the proxy to hold a producer lease and
-assemble sampled still images into device-side animation clips. The default
-`immediate` mode remains compatible with simple `/api/image` adapters.
+which expose `/api/stream/frame` and `/api/stream/flush`. In that mode every
+explicit `studio_publish` is submitted and then committed atomically under the
+stable `display.source` lease. Renderer previews never reach either display
+endpoint. The default `immediate` mode remains compatible with simple
+`/api/image` adapters.
 
 ## Operator interface
 
@@ -118,9 +120,10 @@ npm --prefix web test
   wake to the shared, human-readable history.
 - `studio_exec({command, timeout_ms})` runs arbitrary shell in the configured
   disposable executor, never in the controller.
-- `studio_publish({path})` publishes one model-driven scene from the sandbox.
-- `studio_watch({path, fps})` samples a locally rendered framebuffer without an
-  inference call per frame.
+- `studio_publish({path})` explicitly commits one finished scene from the
+  sandbox to the physical display.
+- `studio_watch({path, fps})` samples a locally rendered framebuffer for the
+  operator preview and archive without inference calls or physical publishes.
 - `studio_schedule(...)` creates one-shot or recurring model wakes inside the
   current lease.
 

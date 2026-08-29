@@ -109,12 +109,45 @@ func (h *HTTP) Publish(ctx context.Context, png []byte, hold time.Duration) erro
 	if err != nil {
 		return err
 	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		_ = response.Body.Close()
+		return fmt.Errorf("display publish returned %s: %s", response.Status, strings.TrimSpace(string(message)))
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	if err := response.Body.Close(); err != nil {
+		return err
+	}
+	if h.path == "/api/stream/frame" {
+		return h.flushStream(ctx, hold)
+	}
+
+	return nil
+}
+
+// flushStream turns a buffered submission into an explicit scene commit. Live
+// renderers are preview-only in the controller; reaching this adapter means an
+// agent deliberately called studio_publish and expects the resident display
+// asset to change now.
+func (h *HTTP) flushStream(ctx context.Context, hold time.Duration) error {
+	body, _ := json.Marshal(map[string]any{
+		"source":  h.source,
+		"seconds": max(0, int64(hold.Seconds())),
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.baseURL+"/api/stream/flush", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := h.client.Do(request)
+	if err != nil {
+		return err
+	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("display publish returned %s: %s", response.Status, strings.TrimSpace(string(message)))
+		return fmt.Errorf("display stream commit returned %s: %s", response.Status, strings.TrimSpace(string(message)))
 	}
-
 	return nil
 }
 
