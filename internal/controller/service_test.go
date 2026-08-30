@@ -328,6 +328,13 @@ func TestRendererCommitsCompleteResidentClipInsteadOfIndividualFrames(t *testing
 	if err != nil || lease == nil {
 		t.Fatalf("active lease = %+v, error = %v", lease, err)
 	}
+	deadline := time.Now().Add(time.Second)
+	for service.isRunning(lease.ID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if service.isRunning(lease.ID) {
+		t.Fatal("initial disabled agent wake did not finish")
+	}
 	service.mu.Lock()
 	token := service.tokens[lease.ID]
 	service.mu.Unlock()
