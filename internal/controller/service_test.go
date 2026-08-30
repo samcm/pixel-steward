@@ -406,6 +406,9 @@ func TestLiveRendererSupersedesPreviousWatch(t *testing.T) {
 	if _, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "/workspace/frame.png", FPS: 1}); err == nil {
 		t.Fatal("absolute renderer path was accepted")
 	}
+	if _, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "frame.png", FPS: 1, ClipFrames: 9}); err == nil {
+		t.Fatal("unsafe renderer clip size was accepted")
+	}
 }
 
 func TestDarkPanelRestoresLastDurableAnimation(t *testing.T) {
@@ -522,7 +525,7 @@ func testService(t *testing.T, now *time.Time, runner agent.Runner, panel displa
 	cfg := config.Config{
 		Version: 2, Timezone: "Australia/Brisbane",
 		Display: config.Display{Adapter: "fake", MaxFPS: 1,
-			Live: config.Live{ClipFrames: 60, FrameDelay: config.Duration(time.Second), RefreshInterval: config.Duration(30 * time.Minute),
+			Live: config.Live{ClipFrames: 8, FrameDelay: config.Duration(2 * time.Second), RefreshInterval: config.Duration(30 * time.Minute),
 				MinimumRefresh: config.Duration(5 * time.Minute), RestorePollInterval: config.Duration(10 * time.Second)},
 			Blackout: config.TimeSpan{Start: "21:00", End: "09:00"}},
 		Scheduler: config.Scheduler{DefaultLease: config.Duration(24 * time.Hour), DefaultCooldown: config.Duration(time.Hour), Selection: "weighted_random", AvoidImmediateRepeat: true},

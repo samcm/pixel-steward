@@ -269,8 +269,8 @@ func (s *Service) rendererSettings(value rendererPayload) (rendererPayload, erro
 	if value.RefreshSeconds == 0 {
 		value.RefreshSeconds = int64(s.config.Display.Live.RefreshInterval.Duration().Seconds())
 	}
-	if value.ClipFrames < 2 || value.ClipFrames > 60 {
-		return rendererPayload{}, errors.New("clip_frames must be between 2 and 60")
+	if value.ClipFrames < 2 || value.ClipFrames > s.config.Display.Live.ClipFrames {
+		return rendererPayload{}, fmt.Errorf("clip_frames must be between 2 and the controller limit of %d", s.config.Display.Live.ClipFrames)
 	}
 	delay := time.Duration(value.FrameDelayMS) * time.Millisecond
 	if delay < 50*time.Millisecond || delay > time.Minute {
@@ -350,8 +350,8 @@ func palettedFrame(rgb []byte) *image.Paletted {
 }
 
 func encodeResidentGIF(frames []*image.Paletted, delay time.Duration) ([]byte, error) {
-	if len(frames) < 2 || len(frames) > 60 {
-		return nil, fmt.Errorf("resident animation needs 2-60 frames, got %d", len(frames))
+	if len(frames) < 2 || len(frames) > 8 {
+		return nil, fmt.Errorf("resident animation needs 2-8 frames, got %d", len(frames))
 	}
 	delayCentiseconds := max(5, min(6000, int(delay/(10*time.Millisecond))))
 	delays := make([]int, len(frames))

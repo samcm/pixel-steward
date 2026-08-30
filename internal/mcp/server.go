@@ -111,7 +111,7 @@ func tools() []map[string]any {
 		{"name": "studio_watch", "description": "Turn a changing workspace image into a long-running physical scene without inference per frame. The controller archives samples, builds complete device-resident GIF clips in the background, and conservatively swaps clips while the old one keeps playing. Defaults are safe; optionally choose clip length, playback delay, and refresh cadence.", "inputSchema": objectSchema(map[string]any{
 			"path":            map[string]string{"type": "string", "description": "Workspace-relative changing PNG, JPEG, or raw 64x64 RGB path"},
 			"fps":             map[string]any{"type": "number", "minimum": 0.01, "description": "Local sampling rate; this is not a device upload rate"},
-			"clip_frames":     map[string]any{"type": "integer", "minimum": 2, "maximum": 60, "description": "Frames in each resident animation; omit for controller default"},
+			"clip_frames":     map[string]any{"type": "integer", "minimum": 2, "maximum": 8, "description": "Frames in each resident animation; omit for controller default"},
 			"frame_delay_ms":  map[string]any{"type": "integer", "minimum": 50, "maximum": 60000, "description": "Device-side playback delay per frame; omit for controller default"},
 			"refresh_seconds": map[string]any{"type": "integer", "minimum": 1, "description": "How often a newly completed clip may replace the resident clip; controller minimum still applies"},
 		}, []string{"path", "fps"})},

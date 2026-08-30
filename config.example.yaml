@@ -25,8 +25,11 @@ display:
   # clips into resident device animations. The old clip remains on-screen while
   # the next is collected. Refresh limits apply to physical swaps, not sampling.
   live:
-    clip_frames: 60
-    frame_delay: 1s
+    # Pixoo-class firmware may advertise larger animations but serial uploads
+    # become visibly disruptive and can wedge the panel. Eight is the proven
+    # safe resident-clip ceiling.
+    clip_frames: 8
+    frame_delay: 2s
     refresh_interval: 30m
     minimum_refresh: 5m
     restore_poll_interval: 10s
