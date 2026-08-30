@@ -316,14 +316,21 @@ func (s *Server) agentPublish(response http.ResponseWriter, request *http.Reques
 
 func (s *Server) agentWatch(response http.ResponseWriter, request *http.Request) {
 	var body struct {
-		Path string  `json:"path"`
-		FPS  float64 `json:"fps"`
+		Path           string  `json:"path"`
+		FPS            float64 `json:"fps"`
+		ClipFrames     int     `json:"clip_frames"`
+		FrameDelayMS   int64   `json:"frame_delay_ms"`
+		RefreshSeconds int64   `json:"refresh_seconds"`
 	}
 	if err := decode(request, &body); err != nil {
 		writeJSON(response, nil, err)
 		return
 	}
-	value, err := s.service.WatchRenderer(request.Context(), bearer(request), body.Path, body.FPS)
+	value, err := s.service.WatchRenderer(request.Context(), bearer(request), controller.RendererOptions{
+		Path: body.Path, FPS: body.FPS, ClipFrames: body.ClipFrames,
+		FrameDelay:      time.Duration(body.FrameDelayMS) * time.Millisecond,
+		RefreshInterval: time.Duration(body.RefreshSeconds) * time.Second,
+	})
 	writeJSON(response, value, err)
 }
 

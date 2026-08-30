@@ -277,6 +277,18 @@ func (m *Memory) ListFrames(_ context.Context, leaseID string, limit int) ([]dom
 	return tailReverse(filtered, limit), nil
 }
 
+func (m *Memory) LatestPublishedFrame(_ context.Context, leaseID string) (*domain.Frame, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for index := len(m.frames) - 1; index >= 0; index-- {
+		candidate := m.frames[index]
+		if candidate.Published && (leaseID == "" || candidate.LeaseID == leaseID) {
+			return &candidate, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *Memory) UpsertInferenceRequest(_ context.Context, request domain.InferenceRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

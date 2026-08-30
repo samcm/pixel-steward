@@ -61,6 +61,10 @@ runtime: {driver: disabled, workspace_root: ./workspaces}
 	if cfg.Display.PublishMode != "immediate" || cfg.Display.Source != "pixel-steward" {
 		t.Fatalf("display publishing defaults = mode %q source %q", cfg.Display.PublishMode, cfg.Display.Source)
 	}
+	if cfg.Display.Live.ClipFrames != 60 || cfg.Display.Live.FrameDelay.Duration() != time.Second ||
+		cfg.Display.Live.RefreshInterval.Duration() != 30*time.Minute || cfg.Display.Live.MinimumRefresh.Duration() != 5*time.Minute {
+		t.Fatalf("display live defaults = %+v", cfg.Display.Live)
+	}
 	if got := cfg.Scheduler.DefaultLease.Duration(); got != 24*time.Hour {
 		t.Fatalf("default lease = %s", got)
 	}

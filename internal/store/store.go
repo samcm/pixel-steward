@@ -26,6 +26,7 @@ type Store interface {
 	ListJournalEntries(context.Context, string, int) ([]domain.JournalEntry, error)
 	AppendFrame(context.Context, domain.Frame) (domain.Frame, error)
 	ListFrames(context.Context, string, int) ([]domain.Frame, error)
+	LatestPublishedFrame(context.Context, string) (*domain.Frame, error)
 	UpsertInferenceRequest(context.Context, domain.InferenceRequest) error
 	ListInferenceRequests(context.Context, string, int) ([]domain.InferenceRequest, error)
 

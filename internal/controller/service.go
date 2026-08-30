@@ -57,8 +57,11 @@ type Service struct {
 	ledgers      map[string]*budget.Ledger
 	tokens       map[string]string
 	running      map[string]context.CancelFunc
+	liveClips    map[string]*liveClip
+	reconciled   map[string]bool
 	sandboxState string
 	screenState  *bool
+	displayProbe time.Time
 }
 
 // Status separates the independent layers an operator must distinguish:
@@ -149,6 +152,7 @@ func New(cfg config.Config, database store.Store, objects objectstore.Store, pan
 		testWindowUntil: testWindowUntil,
 		selectr:         scheduler.Selector{AvoidImmediateRepeat: cfg.Scheduler.AvoidImmediateRepeat},
 		ledgers:         make(map[string]*budget.Ledger), tokens: make(map[string]string), running: make(map[string]context.CancelFunc),
+		liveClips: make(map[string]*liveClip), reconciled: make(map[string]bool),
 	}
 	if err := service.syncPersonas(context.Background()); err != nil {
 		return nil, err
@@ -228,6 +232,15 @@ func (s *Service) Tick(ctx context.Context) error {
 	_ = s.setSandbox(ctx, lease.ID, true)
 	if err := s.ensureLeaseState(ctx, lease); err != nil {
 		return err
+	}
+	if err := s.reconcileRendererSchedules(ctx, *lease, now); err != nil {
+		return err
+	}
+	// Display recovery must never block the agent scheduler. A proxy or panel
+	// outage is recorded and retried independently while inference, local
+	// rendering, and archival continue.
+	if err := s.ensureDisplayActive(ctx, *lease, now); err != nil {
+		s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "display.restore.error", Payload: jsonValue(map[string]string{"error": err.Error()})})
 	}
 	if s.isRunning(lease.ID) {
 		return nil
@@ -411,10 +424,6 @@ func (s *Service) PublishPath(ctx context.Context, token, path string, modelDriv
 	return s.publishPath(ctx, token, path, modelDriven, true)
 }
 
-func (s *Service) previewPath(ctx context.Context, token, path string) (domain.Frame, error) {
-	return s.publishPath(ctx, token, path, false, false)
-}
-
 func (s *Service) publishPath(ctx context.Context, token, path string, modelDriven, commit bool) (domain.Frame, error) {
 	lease, err := s.authorize(ctx, token)
 	if err != nil {
@@ -429,18 +438,6 @@ func (s *Service) publishPath(ctx context.Context, token, path string, modelDriv
 	}
 	defer source.Close()
 	return s.publish(ctx, token, contentType, source, modelDriven, commit)
-}
-
-func (s *Service) WatchRenderer(ctx context.Context, token, path string, fps float64) (domain.Schedule, error) {
-	if fps <= 0 || fps > s.config.Display.MaxFPS {
-		return domain.Schedule{}, fmt.Errorf("fps must be greater than zero and at most %.3g", s.config.Display.MaxFPS)
-	}
-	now := s.clock()
-	interval := time.Duration(float64(time.Second) / fps)
-	payload := jsonValue(map[string]string{"path": path})
-	schedule := domain.Schedule{Kind: "renderer", Label: "renderer:" + path, RunAt: now.Add(interval), Interval: interval,
-		MissedPolicy: "skip", Payload: payload}
-	return s.CreateSchedule(ctx, token, schedule)
 }
 
 func (s *Service) Publish(ctx context.Context, token, contentType string, source io.Reader, modelDriven bool) (domain.Frame, error) {
@@ -841,30 +838,6 @@ func (s *Service) createLease(ctx context.Context, now time.Time) (*domain.Lease
 	s.mu.Unlock()
 	s.event(ctx, domain.Event{At: now, LeaseID: lease.ID, PersonaID: lease.PersonaID, Actor: "controller", Type: "lease.selected", Payload: jsonValue(decision)})
 	return &lease, nil
-}
-
-func (s *Service) runRenderer(ctx context.Context, lease domain.Lease, schedule domain.Schedule, now time.Time) error {
-	var payload struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(schedule.Payload, &payload); err != nil || payload.Path == "" {
-		_ = s.store.MarkScheduleRun(ctx, lease.ID, schedule.ID, now, nil)
-		return errors.New("renderer schedule has invalid path")
-	}
-	s.mu.Lock()
-	token := s.tokens[lease.ID]
-	s.mu.Unlock()
-	_, publishErr := s.previewPath(ctx, token, payload.Path)
-	next := now.Add(schedule.Interval)
-	if !next.Before(lease.EndsAt) {
-		next = time.Time{}
-	}
-	var nextPointer *time.Time
-	if !next.IsZero() {
-		nextPointer = &next
-	}
-	markErr := s.store.MarkScheduleRun(ctx, lease.ID, schedule.ID, now, nextPointer)
-	return errors.Join(publishErr, markErr)
 }
 
 func (s *Service) startWake(parent context.Context, lease domain.Lease, reason string, payload json.RawMessage) error {

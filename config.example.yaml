@@ -18,10 +18,18 @@ display:
   max_fps: 1
   # HTTP adapters may use immediate or buffered_stream publishing. Buffered
   # mode commits studio_publish transactions through a compatible proxy and
-  # requires a stable source name for its producer lease. studio_watch remains
-  # preview-only in either mode.
+  # requires a stable source name for its producer lease.
   publish_mode: immediate
   source: pixel-steward
+  # studio_watch samples locally at the requested rate, then turns complete
+  # clips into resident device animations. The old clip remains on-screen while
+  # the next is collected. Refresh limits apply to physical swaps, not sampling.
+  live:
+    clip_frames: 60
+    frame_delay: 1s
+    refresh_interval: 30m
+    minimum_refresh: 5m
+    restore_poll_interval: 10s
   blackout:
     start: "21:00"
     end: "09:00"

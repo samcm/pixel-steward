@@ -68,7 +68,19 @@ type Display struct {
 	MaxFPS      float64  `yaml:"max_fps"`
 	PublishMode string   `yaml:"publish_mode"`
 	Source      string   `yaml:"source"`
+	Live        Live     `yaml:"live"`
 	Blackout    TimeSpan `yaml:"blackout"`
+}
+
+// Live controls how a changing sandbox framebuffer becomes a resident device
+// animation. Samples are archived individually, but the physical display only
+// receives complete GIF clips at the configured cadence.
+type Live struct {
+	ClipFrames          int      `yaml:"clip_frames"`
+	FrameDelay          Duration `yaml:"frame_delay"`
+	RefreshInterval     Duration `yaml:"refresh_interval"`
+	MinimumRefresh      Duration `yaml:"minimum_refresh"`
+	RestorePollInterval Duration `yaml:"restore_poll_interval"`
 }
 
 type TimeSpan struct {
@@ -224,6 +236,21 @@ func (c *Config) setDefaults() error {
 	if c.Display.Source == "" {
 		c.Display.Source = "pixel-steward"
 	}
+	if c.Display.Live.ClipFrames == 0 {
+		c.Display.Live.ClipFrames = 60
+	}
+	if c.Display.Live.FrameDelay == 0 {
+		c.Display.Live.FrameDelay = Duration(time.Second)
+	}
+	if c.Display.Live.RefreshInterval == 0 {
+		c.Display.Live.RefreshInterval = Duration(30 * time.Minute)
+	}
+	if c.Display.Live.MinimumRefresh == 0 {
+		c.Display.Live.MinimumRefresh = Duration(5 * time.Minute)
+	}
+	if c.Display.Live.RestorePollInterval == 0 {
+		c.Display.Live.RestorePollInterval = Duration(10 * time.Second)
+	}
 	if c.Scheduler.DefaultLease == 0 {
 		c.Scheduler.DefaultLease = Duration(24 * time.Hour)
 	}
@@ -283,6 +310,21 @@ func (c Config) Validate() error {
 	}
 	if c.Display.PublishMode == "buffered_stream" && strings.TrimSpace(c.Display.Source) == "" {
 		problems = append(problems, errors.New("display.source is required for buffered_stream mode"))
+	}
+	if c.Display.Live.ClipFrames < 2 || c.Display.Live.ClipFrames > 60 {
+		problems = append(problems, errors.New("display.live.clip_frames must be between 2 and 60"))
+	}
+	if c.Display.Live.FrameDelay.Duration() < 50*time.Millisecond || c.Display.Live.FrameDelay.Duration() > time.Minute {
+		problems = append(problems, errors.New("display.live.frame_delay must be between 50ms and 1m"))
+	}
+	if c.Display.Live.MinimumRefresh.Duration() <= 0 {
+		problems = append(problems, errors.New("display.live.minimum_refresh must be greater than zero"))
+	}
+	if c.Display.Live.RefreshInterval.Duration() < c.Display.Live.MinimumRefresh.Duration() {
+		problems = append(problems, errors.New("display.live.refresh_interval must be at least display.live.minimum_refresh"))
+	}
+	if c.Display.Live.RestorePollInterval.Duration() <= 0 {
+		problems = append(problems, errors.New("display.live.restore_poll_interval must be greater than zero"))
 	}
 	if err := validateTimeSpan("display.blackout", c.Display.Blackout); err != nil {
 		problems = append(problems, err)

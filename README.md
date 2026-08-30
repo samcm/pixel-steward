@@ -29,7 +29,8 @@ example values, and deployment primitives.
 - agent-authored 1-3 sentence journal entries, exposed as `history_journal`, so
   future agents can recover intent without decoding runtime telemetry;
 - a disposable-executor contract for arbitrary commands and Docker workloads;
-- one-shot scene publishing and budget-free sampling of locally rendered files;
+- one-shot scene publishing and budget-free local renderers compiled into
+  conservatively refreshed, device-resident animations;
 - immutable source/final-frame archival to a filesystem or S3-compatible store;
 - an operator interface whose primary surface is the agent's real transcript —
   verbatim model text and full tool calls with their exact commands, inputs,
@@ -52,8 +53,11 @@ example values, and deployment primitives.
 - Model calls have hard token, call, time, scene-commit, and optional cost caps.
 - Agents can inspect current accounting but cannot increase budgets or change
   reasoning effort.
-- Local renderers can generate every preview frame without consuming inference
-  tokens or hammering the physical panel; display changes are explicit commits.
+- Local renderers can generate every sampled frame without consuming inference
+  tokens. The controller publishes only complete resident animation clips at a
+  configured minimum cadence, never individual renderer frames.
+- A proxy restart automatically restores the most recent durable scene; it does
+  not leave the panel dark until the next model wake.
 - Provider-native token and cost fields are retained without inventing missing
   subscription costs.
 - Configuration can reference environment variables, but secrets are never
@@ -75,9 +79,10 @@ disabled sandbox execution.
 
 The HTTP display adapter supports `publish_mode: buffered_stream` for proxies
 which expose `/api/stream/frame` and `/api/stream/flush`. In that mode every
-explicit `studio_publish` is submitted and then committed atomically under the
-stable `display.source` lease. Renderer previews never reach either display
-endpoint. The default `immediate` mode remains compatible with simple
+explicit still `studio_publish` is submitted and then committed atomically
+under the stable `display.source` lease. Finished GIFs and controller-built
+renderer clips use `/api/image` so the device plays them without network traffic
+between frames. The default `immediate` mode remains compatible with simple
 `/api/image` adapters.
 
 ## Operator interface
@@ -122,8 +127,10 @@ npm --prefix web test
   disposable executor, never in the controller.
 - `studio_publish({path})` explicitly commits one finished scene from the
   sandbox to the physical display.
-- `studio_watch({path, fps})` samples a locally rendered framebuffer for the
-  operator preview and archive without inference calls or physical publishes.
+- `studio_watch({path, fps, clip_frames?, frame_delay_ms?, refresh_seconds?})`
+  samples a changing local framebuffer without inference, archives previews,
+  and conservatively swaps complete device-resident GIF clips. Repeating the
+  call replaces the previous live renderer rather than stacking another loop.
 - `studio_schedule(...)` creates one-shot or recurring model wakes inside the
   current lease.
 

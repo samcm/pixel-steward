@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,57 @@ type blockingRunner struct {
 type recordingExecutor struct {
 	executor.Disabled
 	suspends int
+}
+
+type changingFramebuffer struct {
+	executor.Disabled
+	mu    sync.Mutex
+	value byte
+}
+
+func (e *changingFramebuffer) ReadFile(context.Context, string, string) (io.ReadCloser, string, error) {
+	e.mu.Lock()
+	e.value += 71
+	value := e.value
+	e.mu.Unlock()
+	raw := bytes.Repeat([]byte{value, value / 2, 255 - value}, stewardframe.Width*stewardframe.Height)
+	return io.NopCloser(bytes.NewReader(raw)), "application/octet-stream", nil
+}
+
+type restoringPanel struct {
+	mu        sync.Mutex
+	status    display.Status
+	publishes [][]byte
+}
+
+func newRestoringPanel() *restoringPanel {
+	return &restoringPanel{status: display.Status{Online: true, ScreenOn: true}}
+}
+
+func (p *restoringPanel) Publish(_ context.Context, asset []byte, _ string, _ time.Duration) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.publishes = append(p.publishes, bytes.Clone(asset))
+	p.status.ScreenOn = true
+	p.status.Frames++
+	at := time.Now().UTC()
+	p.status.LastFrameAt = &at
+	return nil
+}
+
+func (p *restoringPanel) SetScreen(_ context.Context, on bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.status.ScreenOn = on
+	return nil
+}
+
+func (p *restoringPanel) Status(context.Context) (display.Status, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result := p.status
+	result.CheckedAt = time.Now().UTC()
+	return result, nil
 }
 
 func (e *recordingExecutor) Suspend(context.Context, string) error {
@@ -263,6 +315,138 @@ func TestExplicitGIFCommitPreservesAnimationAsset(t *testing.T) {
 	}
 }
 
+func TestRendererCommitsCompleteResidentClipInsteadOfIndividualFrames(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := display.NewFake()
+	service := testService(t, &now, agent.Disabled{}, panel)
+	service.executor = &changingFramebuffer{}
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.store.ActiveLease(context.Background())
+	if err != nil || lease == nil {
+		t.Fatalf("active lease = %+v, error = %v", lease, err)
+	}
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+	if _, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "frame.png", FPS: 1,
+		ClipFrames: 3, FrameDelay: time.Second, RefreshInterval: 5 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+
+	for index := 0; index < 2; index++ {
+		now = now.Add(time.Second)
+		if err := service.Tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		status, _ := panel.Status(context.Background())
+		if status.Frames != 0 {
+			t.Fatalf("renderer pushed an incomplete clip after %d samples: %+v", index+1, status)
+		}
+	}
+	now = now.Add(time.Second)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := panel.Status(context.Background())
+	if status.Frames != 1 {
+		t.Fatalf("complete clip pushes = %d, want 1", status.Frames)
+	}
+	resident, err := gif.DecodeAll(bytes.NewReader(panel.LastPNG()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resident.Image) != 3 || len(resident.Delay) != 3 || resident.Delay[0] != 100 {
+		t.Fatalf("resident GIF = %d frames delays=%v", len(resident.Image), resident.Delay)
+	}
+
+	now = now.Add(time.Second)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, _ = panel.Status(context.Background())
+	if status.Frames != 1 {
+		t.Fatalf("clip refreshed before the policy interval: %+v", status)
+	}
+}
+
+func TestLiveRendererSupersedesPreviousWatch(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	service := testService(t, &now, agent.Disabled{}, display.NewFake())
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, _ := service.store.ActiveLease(context.Background())
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+	first, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "first.png", FPS: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "second.png", FPS: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedules, err := service.store.ListSchedules(context.Background(), lease.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, schedule := range schedules {
+		if schedule.ID == first.ID && schedule.Enabled {
+			t.Fatal("superseded renderer remains enabled")
+		}
+	}
+	if !second.Enabled {
+		t.Fatal("replacement renderer is not enabled")
+	}
+	if _, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "/workspace/frame.png", FPS: 1}); err == nil {
+		t.Fatal("absolute renderer path was accepted")
+	}
+}
+
+func TestDarkPanelRestoresLastDurableAnimation(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := newRestoringPanel()
+	service := testService(t, &now, agent.Disabled{}, panel)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, _ := service.store.ActiveLease(context.Background())
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+
+	colors := color.Palette{color.Black, color.White}
+	first := image.NewPaletted(image.Rect(0, 0, 2, 2), colors)
+	second := image.NewPaletted(image.Rect(0, 0, 2, 2), colors)
+	second.Pix[0] = 1
+	var animated bytes.Buffer
+	if err := gif.EncodeAll(&animated, &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{10, 10}}); err != nil {
+		t.Fatal(err)
+	}
+	asset := bytes.Clone(animated.Bytes())
+	if _, err := service.publish(context.Background(), token, "image/gif", bytes.NewReader(asset), false, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := panel.SetScreen(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(11 * time.Second)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	panel.mu.Lock()
+	defer panel.mu.Unlock()
+	if len(panel.publishes) != 2 || !bytes.Equal(panel.publishes[1], asset) || !panel.status.ScreenOn {
+		t.Fatalf("restored publishes=%d screen_on=%v", len(panel.publishes), panel.status.ScreenOn)
+	}
+}
+
 func TestPersonaDetailReturnsEmptyCollectionsAsArrays(t *testing.T) {
 	location, _ := time.LoadLocation("Australia/Brisbane")
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
@@ -337,7 +521,10 @@ func testService(t *testing.T, now *time.Time, runner agent.Runner, panel displa
 	cost := 10.0
 	cfg := config.Config{
 		Version: 2, Timezone: "Australia/Brisbane",
-		Display:   config.Display{Adapter: "fake", MaxFPS: 1, Blackout: config.TimeSpan{Start: "21:00", End: "09:00"}},
+		Display: config.Display{Adapter: "fake", MaxFPS: 1,
+			Live: config.Live{ClipFrames: 60, FrameDelay: config.Duration(time.Second), RefreshInterval: config.Duration(30 * time.Minute),
+				MinimumRefresh: config.Duration(5 * time.Minute), RestorePollInterval: config.Duration(10 * time.Second)},
+			Blackout: config.TimeSpan{Start: "21:00", End: "09:00"}},
 		Scheduler: config.Scheduler{DefaultLease: config.Duration(24 * time.Hour), DefaultCooldown: config.Duration(time.Hour), Selection: "weighted_random", AvoidImmediateRepeat: true},
 		Inference: config.Inference{ModelProfile: "model", DefaultThinking: "low", LeaseBudget: config.Budget{MaxInputTokens: 100000, MaxOutputTokens: 10000,
 			MaxModelCalls: 8, MaxActiveRuntime: config.Duration(time.Hour), MaxCostUSD: &cost, MaxModelSceneCommits: 20},

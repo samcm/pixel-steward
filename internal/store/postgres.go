@@ -406,6 +406,22 @@ func (p *Postgres) ListFrames(ctx context.Context, leaseID string, limit int) ([
 	return result, rows.Err()
 }
 
+func (p *Postgres) LatestPublishedFrame(ctx context.Context, leaseID string) (*domain.Frame, error) {
+	row := p.pool.QueryRow(ctx, `SELECT id,lease_id,persona_id,sequence,created_at,source_object,final_object,
+    sha256,width,height,published,publish_error FROM frames
+    WHERE published AND ($1='' OR lease_id=$1) ORDER BY id DESC LIMIT 1`, leaseID)
+	var value domain.Frame
+	if err := row.Scan(&value.ID, &value.LeaseID, &value.PersonaID, &value.Sequence, &value.CreatedAt,
+		&value.SourceObject, &value.FinalObject, &value.SHA256, &value.Width, &value.Height, &value.Published,
+		&value.PublishError); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &value, nil
+}
+
 func (p *Postgres) UpsertInferenceRequest(ctx context.Context, request domain.InferenceRequest) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO inference_requests
     (id,lease_id,persona_id,provider,model,thinking,thinking_source,provider_request_id,started_at,ended_at,status,
