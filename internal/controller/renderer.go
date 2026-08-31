@@ -210,7 +210,7 @@ func (s *Service) restoreAsset(ctx context.Context, record domain.Frame) ([]byte
 	if len(data) > frame.MaxInput {
 		return nil, "", fmt.Errorf("stored display asset exceeds %d bytes", frame.MaxInput)
 	}
-	if bytes.HasPrefix(data, []byte("GIF8")) {
+	if bytes.HasPrefix(data, []byte("GIF8")) && s.config.Display.Live.ClipFrames > 1 {
 		return data, "image/gif", nil
 	}
 	final, _, err := s.objects.Get(ctx, record.FinalObject)
@@ -269,8 +269,8 @@ func (s *Service) rendererSettings(value rendererPayload) (rendererPayload, erro
 	if value.RefreshSeconds == 0 {
 		value.RefreshSeconds = int64(s.config.Display.Live.RefreshInterval.Duration().Seconds())
 	}
-	if value.ClipFrames < 2 || value.ClipFrames > s.config.Display.Live.ClipFrames {
-		return rendererPayload{}, fmt.Errorf("clip_frames must be between 2 and the controller limit of %d", s.config.Display.Live.ClipFrames)
+	if value.ClipFrames < 1 || value.ClipFrames > s.config.Display.Live.ClipFrames {
+		return rendererPayload{}, fmt.Errorf("clip_frames must be between 1 and the controller limit of %d", s.config.Display.Live.ClipFrames)
 	}
 	delay := time.Duration(value.FrameDelayMS) * time.Millisecond
 	if delay < 50*time.Millisecond || delay > time.Minute {
@@ -316,11 +316,17 @@ func (s *Service) updateLiveClip(ctx context.Context, token string, schedule dom
 	state.lastAttempt = now
 	s.mu.Unlock()
 
-	asset, err := encodeResidentGIF(frames, time.Duration(settings.FrameDelayMS)*time.Millisecond)
-	if err != nil {
-		return err
+	asset := bytes.Clone(processed.PNG)
+	contentType := "image/png"
+	if len(frames) > 1 {
+		var err error
+		asset, err = encodeResidentGIF(frames, time.Duration(settings.FrameDelayMS)*time.Millisecond)
+		if err != nil {
+			return err
+		}
+		contentType = "image/gif"
 	}
-	record, err := s.publish(ctx, token, "image/gif", bytes.NewReader(asset), false, true)
+	record, err := s.publish(ctx, token, contentType, bytes.NewReader(asset), false, true)
 	if err != nil {
 		return err
 	}
@@ -329,6 +335,7 @@ func (s *Service) updateLiveClip(ctx context.Context, token string, schedule dom
 	s.mu.Unlock()
 	s.event(ctx, domain.Event{At: now, LeaseID: schedule.LeaseID, PersonaID: schedule.PersonaID, Actor: "controller", Type: "renderer.clip.committed", Payload: jsonValue(map[string]any{
 		"schedule_id": schedule.ID, "frame_id": record.ID, "frames": len(frames), "frame_delay_ms": settings.FrameDelayMS,
+		"content_type":    contentType,
 		"refresh_seconds": settings.RefreshSeconds,
 	})})
 	return nil

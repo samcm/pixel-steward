@@ -311,8 +311,8 @@ func (c Config) Validate() error {
 	if c.Display.PublishMode == "buffered_stream" && strings.TrimSpace(c.Display.Source) == "" {
 		problems = append(problems, errors.New("display.source is required for buffered_stream mode"))
 	}
-	if c.Display.Live.ClipFrames < 2 || c.Display.Live.ClipFrames > 8 {
-		problems = append(problems, errors.New("display.live.clip_frames must be between 2 and 8"))
+	if c.Display.Live.ClipFrames < 1 || c.Display.Live.ClipFrames > 8 {
+		problems = append(problems, errors.New("display.live.clip_frames must be between 1 and 8"))
 	}
 	if c.Display.Live.FrameDelay.Duration() < 50*time.Millisecond || c.Display.Live.FrameDelay.Duration() > time.Minute {
 		problems = append(problems, errors.New("display.live.frame_delay must be between 50ms and 1m"))

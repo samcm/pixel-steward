@@ -315,6 +315,39 @@ func TestExplicitGIFCommitPreservesAnimationAsset(t *testing.T) {
 	}
 }
 
+func TestExplicitGIFCommitIsFlattenedInStillOnlyMode(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := display.NewFake()
+	service := testService(t, &now, agent.Disabled{}, panel)
+	service.config.Display.Live.ClipFrames = 1
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.store.ActiveLease(context.Background())
+	if err != nil || lease == nil {
+		t.Fatalf("active lease = %+v, error = %v", lease, err)
+	}
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+
+	colors := color.Palette{color.Black, color.White}
+	first := image.NewPaletted(image.Rect(0, 0, 2, 2), colors)
+	second := image.NewPaletted(image.Rect(0, 0, 2, 2), colors)
+	second.Pix[0] = 1
+	var animated bytes.Buffer
+	if err := gif.EncodeAll(&animated, &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{10, 10}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.publish(context.Background(), token, "image/gif", bytes.NewReader(animated.Bytes()), false, true); err != nil {
+		t.Fatal(err)
+	}
+	if asset := panel.LastPNG(); !bytes.HasPrefix(asset, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("animated commit was not flattened: %x", asset[:min(8, len(asset))])
+	}
+}
+
 func TestRendererCommitsCompleteResidentClipInsteadOfIndividualFrames(t *testing.T) {
 	location, _ := time.LoadLocation("Australia/Brisbane")
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
@@ -376,6 +409,44 @@ func TestRendererCommitsCompleteResidentClipInsteadOfIndividualFrames(t *testing
 	status, _ = panel.Status(context.Background())
 	if status.Frames != 1 {
 		t.Fatalf("clip refreshed before the policy interval: %+v", status)
+	}
+}
+
+func TestRendererCommitsPNGWhenConfiguredForOneFrame(t *testing.T) {
+	location, _ := time.LoadLocation("Australia/Brisbane")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, location)
+	panel := display.NewFake()
+	service := testService(t, &now, agent.Disabled{}, panel)
+	service.config.Display.Live.ClipFrames = 1
+	service.executor = &changingFramebuffer{}
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.store.ActiveLease(context.Background())
+	if err != nil || lease == nil {
+		t.Fatalf("active lease = %+v, error = %v", lease, err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for service.isRunning(lease.ID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	service.mu.Lock()
+	token := service.tokens[lease.ID]
+	service.mu.Unlock()
+	if _, err := service.WatchRenderer(context.Background(), token, RendererOptions{Path: "frame.png", FPS: 1,
+		ClipFrames: 1, FrameDelay: time.Second, RefreshInterval: 5 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if err := service.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := panel.Status(context.Background())
+	if status.Frames != 1 {
+		t.Fatalf("still commits = %d, want 1", status.Frames)
+	}
+	if asset := panel.LastPNG(); !bytes.HasPrefix(asset, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("physical asset is not a PNG: %x", asset[:min(8, len(asset))])
 	}
 }
 

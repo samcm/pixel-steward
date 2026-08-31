@@ -91,6 +91,31 @@ inference:
 	}
 }
 
+func TestParseAllowsSingleFrameLiveCommits(t *testing.T) {
+	raw := []byte(`
+version: 2
+timezone: UTC
+display:
+  adapter: fake
+  max_fps: 1
+  live: {clip_frames: 1}
+  blackout: {start: "21:00", end: "09:00"}
+scheduler: {default_lease: 24h, selection: weighted_random, default_cooldown: 24h}
+inference:
+  allowed_window: {start: "09:00", end: "21:00"}
+  thinking_change_policy: operator_only
+  lease_budget: {max_input_tokens: 1, max_output_tokens: 1, max_model_calls: 1, max_active_runtime: 1s, max_model_scene_commits: 1}
+  per_call: {max_output_tokens: 1}
+`)
+	cfg, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if cfg.Display.Live.ClipFrames != 1 {
+		t.Fatalf("clip frames = %d, want 1", cfg.Display.Live.ClipFrames)
+	}
+}
+
 func TestParseRejectsInvalidTestWindowDeadline(t *testing.T) {
 	raw := []byte(`
 version: 2

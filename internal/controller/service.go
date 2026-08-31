@@ -472,7 +472,7 @@ func (s *Service) publish(ctx context.Context, token, contentType string, source
 	displayAsset := processed.PNG
 	displayContentType := "image/png"
 	digest := processed.SHA256
-	if bytes.HasPrefix(data, []byte("GIF8")) {
+	if bytes.HasPrefix(data, []byte("GIF8")) && s.config.Display.Live.ClipFrames > 1 {
 		displayAsset = data
 		displayContentType = "image/gif"
 		digest = fmt.Sprintf("%x", sha256.Sum256(data))
@@ -862,7 +862,7 @@ func (s *Service) startWake(parent context.Context, lease domain.Lease, reason s
 	}
 	leasePrompt := prompt.Build(prompt.Context{Lease: lease, Persona: persona, Soul: string(soul), Now: s.clock(),
 		Timezone: s.config.Timezone, BlackoutFrom: s.config.Display.Blackout.Start, BlackoutTo: s.config.Display.Blackout.End,
-		Budget: ledger.Snapshot(s.clock())})
+		Budget: ledger.Snapshot(s.clock()), StillOnly: s.config.Display.Live.ClipFrames == 1})
 	if len(payload) > 0 && string(payload) != "{}" {
 		leasePrompt += "\n\nScheduled wake context:\n" + string(payload)
 	}
